@@ -19,7 +19,8 @@
 #
 # Build:  pyinstaller --clean --noconfirm Metin2FishBot.spec
 #         -> erzeugt dist/Metin2FishBot/ (Ordner mit Metin2FishBot.exe + Libs)
-# (oder einfach build.bat doppelklicken; baut zusaetzlich den Installer)
+# Hinweis: Ausgeliefert wird die Portable (Metin2FishBot_onefile.spec, was auch
+# build.bat baut). Diese onedir-Spec bleibt als Entwickler-/Fallback-Build.
 
 import os
 import sys
@@ -34,8 +35,8 @@ block_cipher = None
 # --- Versions-Konstanten: EINE Quelle der Wahrheit ist version.py (Repo-Root).
 # SPEC ist der absolute Pfad dieser Spec (von PyInstaller injiziert) -> dessen
 # Verzeichnis ist das Repo-Root, wo version.py liegt; robust unabhaengig vom cwd.
-# (Inno/installer.iss kann kein Python importieren -> dort bleibt die Version
-# eine manuelle Aenderung beim Release.)
+# Beide Specs importieren __version__ aus version.py -> beim Release nur dort
+# bumpen (keine manuelle Synchronisierung mehr noetig).
 sys.path.insert(0, os.path.dirname(os.path.abspath(SPEC)))
 from version import __version__, version_tuple
 
@@ -105,7 +106,11 @@ a = Analysis(
         'pydirectinput',
         'pytesseract',
         'version', 'updater',   # lazy importiert zur Laufzeit (app.py)
-    ] + ctk_hidden,
+        'pystray', 'PIL', 'PIL.Image', 'PIL._tkinter_finder',   # Tray + Bilder
+        # Lazy in app.py-Methoden importiert (statische Analyse uebersieht sie):
+        'overlay_preview', 'interface.testwindow',
+        'overlay_mark', 'interface.tray',
+    ] + ctk_hidden + collect_submodules('pystray'),  # pystray laedt sein Backend (pystray._win32) dynamisch -> alle Submodule mitnehmen
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

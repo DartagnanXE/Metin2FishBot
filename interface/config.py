@@ -43,6 +43,22 @@ KEYPOINT_KEYS = ('color', 'getpiece', 'confirm', 'cake')
 DELAY_MIN = 0.1
 DELAY_MAX = 20.0
 
+# Grenzen fuer die Overlay-Deckkraft (Mark-/Vorschau-Overlay). 0.4 = noch klar
+# durchscheinend (pixelgenaues Platzieren), 1.0 = voll deckend. Default bewusst
+# deckender als der historische 0.45-Wert, weil das alte Overlay zu transparent
+# war. Wird via Tk-Attribut '-alpha' auf beide Overlays angewandt; kein Bot-Wert
+# (taucht NICHT in to_values auf).
+OVERLAY_OPACITY_MIN = 0.4
+OVERLAY_OPACITY_MAX = 1.0
+
+# Erlaubte Hotkey-Tokens fuer Angeln (pydirectinput-Keynamen). Einzelne
+# Ziffern/Buchstaben + eine Whitelist gebraeuchlicher Sondertasten. Ungueltige
+# Eingaben fallen auf den Default zurueck -> kein Crash mitten im Lauf.
+HOTKEY_TOKENS = (
+    'space', 'enter', 'tab', 'esc', 'shift', 'ctrl', 'alt',
+    'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
+)
+
 DEFAULT_CONFIG_PATH = 'config.json'
 
 # Vollstaendiges Default-Schema. Entspricht exakt dem heutigen Verhalten:
@@ -60,6 +76,8 @@ DEFAULTS = {
         'stop_after_enabled': False,
         'stop_after_minutes': 0,
         'golden_tuna_action': 3,
+        'bait_key': '2',          # In-Game-Taste, die Koeder wirft
+        'cast_key': '1',          # In-Game-Taste, die die Angel auswirft
     },
     'puzzle': {
         'detection_mode': 'default',
@@ -69,9 +87,16 @@ DEFAULTS = {
         'color_mode': 'single',
         'color_patch': 3,
         'solver_mode': 'standard',
+        'overlay_opacity': 0.85,  # Deckkraft Mark-/Vorschau-Overlay (0.4..1.0)
     },
     'log': {
         'show_in_ui': True,
+    },
+    'window': {                   # Fenster-/Lifecycle-Optionen (alle Default aus)
+        'always_on_top': False,
+        'minimize_to_tray': False,
+        'close_on_metin2_close': False,
+        'close_on_timer_expire': False,
     },
 }
 
@@ -102,6 +127,23 @@ def _coerce_int(value, fallback):
         return int(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _validate_key(value, fallback):
+    """Normalisiert eine Hotkey-Eingabe -> lowercased str. Erlaubt: ein einzelnes
+    Zeichen (Ziffer/Buchstabe/Satzzeichen) ODER ein Token aus HOTKEY_TOKENS.
+    Sonst ``fallback``. Wirft nie."""
+    try:
+        s = str(value).strip().lower()
+    except Exception:
+        return fallback
+    if not s:
+        return fallback
+    if len(s) == 1:
+        return s
+    if s in HOTKEY_TOKENS:
+        return s
+    return fallback
 
 
 def _deep_merge(base, override):
@@ -169,6 +211,10 @@ def validate(cfg):
         fishing['golden_tuna_action'] = (
             action if action in GOLDEN_TUNA_ACTIONS
             else DEFAULTS['fishing']['golden_tuna_action'])
+        fishing['bait_key'] = _validate_key(
+            fishing.get('bait_key'), DEFAULTS['fishing']['bait_key'])
+        fishing['cast_key'] = _validate_key(
+            fishing.get('cast_key'), DEFAULTS['fishing']['cast_key'])
 
         puzzle = merged['puzzle']
         puzzle['detection_mode'] = _enum(
@@ -189,8 +235,20 @@ def validate(cfg):
         puzzle['mark_size'] = _validate_size(puzzle.get('mark_size'))
         puzzle['mark_keypoints'] = _validate_keypoints(
             puzzle.get('mark_keypoints'))
+        puzzle['overlay_opacity'] = _clamp(
+            puzzle.get('overlay_opacity'),
+            OVERLAY_OPACITY_MIN, OVERLAY_OPACITY_MAX,
+            DEFAULTS['puzzle']['overlay_opacity'])
 
         merged['log']['show_in_ui'] = bool(merged['log'].get('show_in_ui', True))
+
+        window = merged['window']
+        window['always_on_top'] = bool(window.get('always_on_top', False))
+        window['minimize_to_tray'] = bool(window.get('minimize_to_tray', False))
+        window['close_on_metin2_close'] = bool(
+            window.get('close_on_metin2_close', False))
+        window['close_on_timer_expire'] = bool(
+            window.get('close_on_timer_expire', False))
 
         return merged
     except Exception:

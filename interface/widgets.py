@@ -36,6 +36,19 @@ TEXT_MUTED = '#94a3b8'    # sekundaerer Text
 LIVE_GREEN = '#22c55e'    # "live"-Punkt
 INK = '#06231f'           # dunkler Text auf Teal (guter Kontrast)
 
+# -- Cockpit-Sidebar-Tokens (opake Naeherungen der Mockup-rgba-Werte) -------
+# CTk braucht opake Hex-Farben (kein rgba); die folgenden Werte bilden die
+# halbtransparenten Mockup-Toene auf dem dunklen Untergrund nach.
+RAIL_BG = '#0c1119'        # Icon-Rail Hintergrund
+RAIL_HOVER = '#161f2e'     # Rail-Item Hover
+STRIP_BG = '#121a26'       # Command-Strip Hintergrund
+PANEL_DARK = '#0e141d'     # Titelleiste / Footer
+TEAL_BRIGHT = '#2dd4bf'    # aktiver Rail-/Timer-Akzent
+TEAL_SOFT = '#15302c'      # opakes ~12%-Teal (aktives Rail-Fill)
+TEXT_FAINT = '#677890'     # sehr gedaempfter Text (Rail idle, Timer-Label)
+AMBER = '#f59e0b'          # Detection "searching" / notify_stop
+DANGER_SOFT = '#3a1620'    # Hover des Close-X
+
 
 class Section(ctk.CTkFrame):
     """Abgesetzte Karte mit Titelzeile; nimmt beliebigen Inhalt auf.
@@ -50,10 +63,10 @@ class Section(ctk.CTkFrame):
         self._title = ctk.CTkLabel(
             self, text=title, anchor='w',
             font=ctk.CTkFont(size=14, weight='bold'), text_color=TEAL)
-        self._title.grid(row=0, column=0, sticky='ew', padx=14, pady=(12, 4))
+        self._title.grid(row=0, column=0, sticky='ew', padx=14, pady=(8, 2))
 
         self.body = ctk.CTkFrame(self, fg_color='transparent')
-        self.body.grid(row=1, column=0, sticky='nsew', padx=10, pady=(0, 12))
+        self.body.grid(row=1, column=0, sticky='nsew', padx=10, pady=(0, 8))
         self.body.grid_columnconfigure(0, weight=1)
 
 
@@ -273,18 +286,25 @@ class SegmentedRow(ctk.CTkFrame):
     """
 
     def __init__(self, master, label, values, default=None, command=None,
-                 info=None, info_image=None, **kwargs):
+                 info=None, info_image=None, info_image_size=(260, 170),
+                 **kwargs):
         super().__init__(master, fg_color='transparent', **kwargs)
         self.grid_columnconfigure(0, weight=1)
 
-        if label:
+        # Kopfzeile zeigen, sobald es ein Label ODER ein ?-Badge (info/
+        # info_image) gibt. Frueher war sie an ``if label:`` gekoppelt -> das
+        # Detection-Segment (label='') verlor sein Referenzbild-"?". Spalte 0
+        # waechst, daher rastet das Badge auch ohne Label rechts ein.
+        if label or info or info_image:
             head = ctk.CTkFrame(self, fg_color='transparent')
             head.grid(row=0, column=0, sticky='ew', pady=(0, 3))
             head.grid_columnconfigure(0, weight=1)
-            ctk.CTkLabel(head, text=label, anchor='w',
-                         text_color=TEXT).grid(row=0, column=0, sticky='w')
+            if label:
+                ctk.CTkLabel(head, text=label, anchor='w',
+                             text_color=TEXT).grid(row=0, column=0, sticky='w')
             if info or info_image:
-                InfoBadge(head, text=info or '', image_path=info_image).grid(
+                InfoBadge(head, text=info or '', image_path=info_image,
+                          image_size=info_image_size).grid(
                     row=0, column=1, sticky='e')
 
         self._seg = Segmented(self, values=values, default=default,

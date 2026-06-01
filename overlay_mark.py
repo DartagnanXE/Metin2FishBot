@@ -92,12 +92,38 @@ DEFAULT_OFFSET = (270, 227)
 BOARD_SIZE = calibration.DEFAULT_EXPECTED_SIZE          # (260, 170)
 REFERENCE_IMAGE = 'images/calibration_reference.png'    # Vorlage fuer die Punkte
 
-# Transparenz des Overlays (0..1). Genug Durchblick fuer pixelgenaues Platzieren.
-OVERLAY_ALPHA = 0.45
+# Transparenz des Overlays (0..1). Deckender als frueher (0.45 war zu durch-
+# sichtig), aber noch genug Durchblick fuer pixelgenaues Platzieren. Dient nur
+# als Modul-Default; der konkrete Wert kommt zur Laufzeit aus der Config
+# (puzzle.overlay_opacity) und wird an pick_offset_interactive(alpha=..) gereicht.
+OVERLAY_ALPHA = 0.85
 # Halber Kantenmass der quadratischen Griff-Anfasser (in Bildschirm-Pixeln).
 HANDLE_HALF = 7
 # Radius der gezeichneten Raster-Vorschau-Punkte.
 DOT_RADIUS = 3
+
+# Erlaubter Deckkraft-Bereich (deckt sich mit config.OVERLAY_OPACITY_MIN/MAX).
+# Hier bewusst lokal gehalten, damit overlay_mark headless ohne interface.config
+# importierbar bleibt.
+ALPHA_MIN = 0.4
+ALPHA_MAX = 1.0
+
+
+def _clamp_alpha(value):
+    """Klemmt eine Deckkraft defensiv in [ALPHA_MIN, ALPHA_MAX].
+
+    Nicht-numerische Eingabe -> Modul-Default ``OVERLAY_ALPHA``. Wirft nie, damit
+    ein kaputter Config-Wert das Overlay nie blockiert.
+    """
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return OVERLAY_ALPHA
+    if number < ALPHA_MIN:
+        return ALPHA_MIN
+    if number > ALPHA_MAX:
+        return ALPHA_MAX
+    return number
 
 # Reihenfolge/Namen der 4 Sonderpunkte (deckt sich mit config.KEYPOINT_KEYS).
 KEYPOINT_KEYS = ('color', 'getpiece', 'confirm', 'cake')
@@ -109,6 +135,10 @@ _KEYPOINT_STYLE = {
     'confirm':  ('OK',      '#22c55e'),   # Green
     'cake':     ('Cake',    '#ec4899'),   # Pink
 }
+
+# Oeffentlicher Alias: damit overlay_preview.py die Sonderpunkt-Stile (Label +
+# Farbe) aus EINER Quelle wiederverwendet, statt sie zu duplizieren.
+KEYPOINT_STYLE = _KEYPOINT_STYLE
 
 # REF-Koordinaten der Sonderpunkte (Default-Startlage relativ zum Raster).
 # Aus geometry, mit defensivem Fallback auf die bekannten Konstanten.
@@ -245,6 +275,18 @@ def _window_origin():
         return None
 
 
+def window_origin():
+    """Oeffentlicher Wrapper um :func:`_window_origin`.
+
+    Liefert den Bildschirmursprung des Spiel-Fensterinhalts ``(ox, oy)`` oder
+    ``None``, wenn das Fenster/der Capture-Stack fehlt. Damit
+    :mod:`overlay_preview` den GLEICHEN Ursprung-Pfad wie das Mark-Overlay nutzt
+    (eine Quelle der Wahrheit), ohne auf das private ``_window_origin``
+    zuzugreifen.
+    """
+    return _window_origin()
+
+
 def _default_grid_corners(default_offset):
     """Default-Bildschirmlage der beiden Raster-Eckgriffe.
 
@@ -275,7 +317,7 @@ class _MarkOverlay:
     (resizable), ohne das Fenster selbst zu skalieren.
     """
 
-    def __init__(self, parent, default_offset, board_size):
+    def __init__(self, parent, default_offset, board_size, alpha=OVERLAY_ALPHA):
         self.result = None
         self.board_w, self.board_h = board_size
 
@@ -286,7 +328,7 @@ class _MarkOverlay:
         self.top.overrideredirect(True)
         self.top.attributes('-topmost', True)
         try:
-            self.top.attributes('-alpha', OVERLAY_ALPHA)
+            self.top.attributes('-alpha', _clamp_alpha(alpha))
         except Exception:
             pass
 
@@ -635,11 +677,15 @@ def _build_result(screen_state):
     return result
 
 
-def pick_offset_interactive(default_offset=DEFAULT_OFFSET, board_size=BOARD_SIZE):
+def pick_offset_interactive(default_offset=DEFAULT_OFFSET, board_size=BOARD_SIZE,
+                            alpha=OVERLAY_ALPHA):
     """Oeffnet das resizable Markier-Overlay und liefert das Kalibrier-Ergebnis.
 
     :param default_offset: Startlage/Fallback ``(x, y)`` (Fensterinhalt-Offset).
     :param board_size: Referenz-Boardgroesse fuer die Vorschau (Default 260x170).
+    :param alpha: Deckkraft des Overlays (0.4..1.0). Aus der Config
+        (``puzzle.overlay_opacity``); nicht-numerisch -> Modul-Default. Wird
+        defensiv geklemmt.
     :return: :class:`MarkResult` (Dict mit ``offset``/``size``/``key_points``)
         bei „Confirm", sonst ``None``.
 
@@ -662,7 +708,7 @@ def pick_offset_interactive(default_offset=DEFAULT_OFFSET, board_size=BOARD_SIZE
             parent.withdraw()
             created_root = True
 
-        overlay = _MarkOverlay(parent, default_offset, board_size)
+        overlay = _MarkOverlay(parent, default_offset, board_size, alpha=alpha)
         screen_state = overlay.run()
     except Exception as exc:
         _log_error(t('mark.overlay_error'), exc=exc)

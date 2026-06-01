@@ -196,6 +196,76 @@ class TestMarkKeypointsValidation(unittest.TestCase):
         self.assertEqual(repr(src), before)
 
 
+class TestNewSettings(unittest.TestCase):
+    def test_hotkey_defaults(self):
+        cfg = config.validate(config.DEFAULTS)
+        self.assertEqual(cfg['fishing']['bait_key'], '2')
+        self.assertEqual(cfg['fishing']['cast_key'], '1')
+
+    def test_hotkey_invalid_falls_back(self):
+        cfg = config.validate({'fishing': {'bait_key': 'nope', 'cast_key': ''}})
+        self.assertEqual(cfg['fishing']['bait_key'], '2')
+        self.assertEqual(cfg['fishing']['cast_key'], '1')
+
+    def test_hotkey_token_and_char_kept_lowercased(self):
+        cfg = config.validate({'fishing': {'bait_key': 'F5', 'cast_key': 'Q'}})
+        self.assertEqual(cfg['fishing']['bait_key'], 'f5')
+        self.assertEqual(cfg['fishing']['cast_key'], 'q')
+
+    def test_window_defaults_present_and_false(self):
+        w = config.validate(config.DEFAULTS)['window']
+        self.assertEqual(w, {'always_on_top': False, 'minimize_to_tray': False,
+                             'close_on_metin2_close': False,
+                             'close_on_timer_expire': False})
+
+    def test_window_bools_coerced(self):
+        w = config.validate({'window': {'always_on_top': 1,
+                                        'minimize_to_tray': 'yes'}})['window']
+        self.assertIs(w['always_on_top'], True)
+        self.assertIs(w['minimize_to_tray'], True)
+
+    def test_old_config_without_window_merges(self):
+        # Alte config.json ohne window/hotkeys -> Defaults aufgefuellt.
+        cfg = config.validate({'mode': 'puzzle', 'fishing': {'bait_time': 3.0}})
+        self.assertIn('window', cfg)
+        self.assertEqual(cfg['fishing']['cast_key'], '1')
+
+
+class TestOverlayOpacity(unittest.TestCase):
+    def _opacity(self, value):
+        cfg = config.validate({'puzzle': {'overlay_opacity': value}})
+        return cfg['puzzle']['overlay_opacity']
+
+    def test_default_present(self):
+        cfg = config.validate(config.DEFAULTS)
+        self.assertEqual(cfg['puzzle']['overlay_opacity'], 0.85)
+
+    def test_clamped_high(self):
+        self.assertEqual(self._opacity(5.0), config.OVERLAY_OPACITY_MAX)
+
+    def test_clamped_low(self):
+        self.assertEqual(self._opacity(0.0), config.OVERLAY_OPACITY_MIN)
+
+    def test_in_range_kept(self):
+        self.assertEqual(self._opacity(0.6), 0.6)
+
+    def test_nonnumeric_falls_back_to_default(self):
+        for bad in ('x', None, [], {}):
+            self.assertEqual(self._opacity(bad), 0.85)
+
+    def test_old_config_without_opacity_backfilled(self):
+        # Alte config.json ohne overlay_opacity -> Default aufgefuellt.
+        cfg = config.validate({'mode': 'puzzle',
+                               'puzzle': {'detection_mode': 'default'}})
+        self.assertEqual(cfg['puzzle']['overlay_opacity'], 0.85)
+
+    def test_not_in_to_values(self):
+        # overlay_opacity ist ein UI-/Puzzle-Wert, kein Fishing-Bot-Wert.
+        v = config.to_values(config.DEFAULTS)
+        self.assertNotIn('overlay_opacity', v)
+        self.assertNotIn('-OVERLAY-', v)
+
+
 class TestToValues(unittest.TestCase):
     def test_keys_and_types(self):
         v = config.to_values(config.DEFAULTS)

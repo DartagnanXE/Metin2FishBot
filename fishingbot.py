@@ -137,6 +137,12 @@ class FishingBot:
     throw_time = 2
     game_time = 2
 
+    # Konfigurierbare In-Game-Tasten (Default = bisheriges Verhalten '2'/'1').
+    # Werden von hack._on_start aus der Config injiziert, BEVOR set_to_begin
+    # laeuft. Default-Werte halten das Verhalten byte-stabil.
+    bait_key = '2'
+    cast_key = '1'
+
     # Golden-Tuna: welches der 3 Dialogfelder geklickt wird (Default 3 = Koeder).
     golden_tuna_action = 3
 
@@ -356,8 +362,8 @@ class FishingBot:
 
             if time() - self.timer_action > self.bait_time:
                 self.detect_text = True
-                pydirectinput.keyDown('2')
-                pydirectinput.keyUp('2')
+                pydirectinput.keyDown(self.bait_key)
+                pydirectinput.keyUp(self.bait_key)
                 self.state = 1
                 self.timer_action = time()
                 _flog(1, t('fishing.bait_set'))
@@ -366,8 +372,8 @@ class FishingBot:
 
         if self.state == 1:
             if time() - self.timer_action > self.throw_time:
-                pydirectinput.keyDown('1')
-                pydirectinput.keyUp('1')
+                pydirectinput.keyDown(self.cast_key)
+                pydirectinput.keyUp(self.cast_key)
                 self.state = 2
                 self.timer_action = time()
                 _flog(2, t('fishing.cast_out'))

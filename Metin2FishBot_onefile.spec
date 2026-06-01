@@ -77,7 +77,11 @@ a = Analysis(
         'pydirectinput',
         'pytesseract',
         'version', 'updater',   # lazy importiert zur Laufzeit (app.py)
-    ] + ctk_hidden,
+        'pystray', 'PIL', 'PIL.Image', 'PIL._tkinter_finder',   # Tray + Bilder
+        # Lazy in app.py-Methoden importiert (statische Analyse uebersieht sie):
+        'overlay_preview', 'interface.testwindow',
+        'overlay_mark', 'interface.tray',
+    ] + ctk_hidden + collect_submodules('pystray'),  # pystray laedt sein Backend (pystray._win32) dynamisch -> alle Submodule mitnehmen
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

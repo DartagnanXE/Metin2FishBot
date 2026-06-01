@@ -4,7 +4,7 @@ Anleitung zur überarbeiteten Version. Der **Angel-Teil** ist funktional
 unverändert (byte-stabil). Neu: ein modernes **Single-Window-UI**
 (CustomTkinter), integriertes **Live-Log**, drei **Board-Detection-Modi** fürs
 Puzzle, **Color-Sampling-Toggle**, optionaler **Trained-Solver** — und ein
-gehärteter Build (onedir + Installer) gegen False-Positive-Virenwarnungen.
+gehärteter **Portable**-Build gegen False-Positive-Virenwarnungen.
 
 ---
 
@@ -28,10 +28,9 @@ gehärteter Build (onedir + Installer) gegen False-Positive-Virenwarnungen.
 - **Mark-Kalibrierung** des Spielfelds: transparentes Overlay über dem Spiel,
   Raster aufziehen + optionale Sonderpunkte — mit mitgeliefertem **Referenzbild**
   als Vorlage (Details in §5).
-- **Gehärteter Build:** EXE ohne UPX, als **Ordner** (onedir) statt
-  selbstentpackender Single-EXE, mit echten **PE-Metadaten** — plus optionaler
-  **Installer**. Das reduziert generische Virenwarnungen (Wacatac & Co.)
-  deutlich (Details + ehrliches Restrisiko in §8).
+- **Gehärteter Build:** Portable EXE ohne UPX, mit echten **PE-Metadaten** und
+  gepinnten Abhängigkeiten. Das senkt generische Virenwarnungen (Wacatac & Co.)
+  — Details + ehrliches Restrisiko in §8.
 - **126 automatische Tests** sichern die Solver- und Erkennungs-Logik ab.
 
 ---
@@ -44,23 +43,16 @@ gehärteter Build (onedir + Installer) gegen False-Positive-Virenwarnungen.
 **Doppelklick-Weg:** **`build.bat`** ausführen. Das Skript:
 
 1. installiert die **gepinnten** Abhängigkeiten aus `requirements.txt`,
-2. baut den **onedir**-Output → `dist\Metin2FishBot\` (mit
-   `Metin2FishBot.exe` + allen Libraries + eingebetteten Assets),
-3. baut – falls **Inno Setup 6** installiert ist – den **Installer**
-   → `installer_output\Metin2FishBot_Setup_1.0.0.exe`.
+2. baut die **Portable** → `dist_onefile\Metin2FishBot.exe` (eine einzige Datei,
+   mit allen Libraries + eingebetteten Assets im Bundle).
 
-Ist Inno Setup nicht installiert, wird Schritt 3 übersprungen; der lauffähige
-Ordner `dist\Metin2FishBot\` steht trotzdem bereit. Inno Setup gibt es hier:
-<https://jrsoftware.org/isdl.php>
+Das ist alles — am Ende liegt **eine** `.exe` bereit, die du direkt weitergeben
+kannst.
 
 ### Verteilung an Nutzer
 
-- **Mit Installer:** das `Setup.exe` aus `installer_output\` weitergeben →
-  Nutzer doppelklicken, fertig (installiert nach `Programme\Metin2FishBot`,
-  legt optional ein Desktop-Icon an).
-- **Ohne Installer:** den **kompletten Ordner** `dist\Metin2FishBot\`
-  weitergeben (gezippt). **Nicht** nur die `.exe` herausziehen — sie braucht
-  die DLLs/Assets daneben.
+- Die **eine** Datei `dist_onefile\Metin2FishBot.exe` weitergeben — fertig.
+  Doppelklick startet sie direkt, keine Installation, keine Begleitdateien.
 
 > Pins prüfen (einmalig vor Release): `py -m pip install -r requirements.txt`
 > dann `py -m pip freeze > installed.txt` und die Versionen in
@@ -71,8 +63,8 @@ Ordner `dist\Metin2FishBot\` steht trotzdem bereit. Inno Setup gibt es hier:
 
 ## 3. Starten
 
-- App **als Administrator** starten (Installer-Verknüpfung oder
-  `Metin2FishBot.exe` im Ordner).
+- App **als Administrator** starten — die `Metin2FishBot.exe` **fordert Admin
+  automatisch an** (UAC-Abfrage bestätigen).
 - Spiel in **800×600**, **nicht** Vollbild. Fenster sichtbar lassen.
 - Fisch-Skill auf Hotkey `1`, Köder auf `2`, Angel ausgerüstet.
 - Im UI Modus **Fishing** oder **Puzzle** wählen, ggf. Settings anpassen,
@@ -222,21 +214,20 @@ die Heuristik — **nicht** tatsächlicher Schadcode.
 ### Was dieser Build bereits dagegen tut
 
 - **Kein UPX** (`upx=False`) — UPX-gepackte EXEs sind ein Haupt-Trigger.
-- **onedir statt onefile** — kein selbstentpackender Stub (das verdächtigste
-  Verhaltensmuster) mehr.
 - **Echte PE-Metadaten** (Firmenname, Produkt, Version, Copyright).
 - **Gepinnte, reproduzierbare** Abhängigkeiten.
-- **Installer** (Inno Setup) — gut reputierter, **signierbarer** Wrapper.
 
-Das senkt die FP-Rate deutlich, **eliminiert sie aber nicht garantiert**
-(siehe Restrisiko unten).
+Das senkt die FP-Rate, **eliminiert sie aber nicht garantiert** (siehe
+Restrisiko unten). Die Portable ist eine **Single-File-EXE** (entpackt sich beim
+Start selbst) — der bequemste Weg für Nutzer, kann aber etwas eher die Heuristik
+triggern als ein entpackter Ordner; die Gegenmaßnahmen unten gelten.
 
 ### Deine Aufgaben als Verteiler/Nutzer
 
-1. **Selbst gegenprüfen — VirusTotal.** Lade die `Metin2FishBot.exe` (oder das
-   `Setup.exe`) hoch: <https://www.virustotal.com/gui/home/upload> — so siehst
-   du, **welche** Engines anschlagen. Bei reinen FPs sind es meist nur wenige,
-   namhafte Engines bleiben sauber.
+1. **Selbst gegenprüfen — VirusTotal.** Lade die `Metin2FishBot.exe` hoch:
+   <https://www.virustotal.com/gui/home/upload> — so siehst du, **welche**
+   Engines anschlagen. Bei reinen FPs sind es meist nur wenige, namhafte
+   Engines bleiben sauber.
 
 2. **False Positive bei Microsoft melden** (entfernt die Warnung für alle
    Nutzer, meist binnen Tagen). Formular „Submit a file for malware analysis":
@@ -249,14 +240,9 @@ Das senkt die FP-Rate deutlich, **eliminiert sie aber nicht garantiert**
 
 3. **Optional, aber am wirksamsten: Code-Signing.** Ein **Code-Signing-
    Zertifikat** (idealerweise **EV**, für sofortige SmartScreen-Reputation)
-   signiert EXE **und** Installer und lässt die meisten Warnungen sofort
-   verschwinden.
-   - In der Inno-Setup-IDE unter **Tools ▸ Configure Sign Tools…** ein Sign-Tool
-     `signtool` anlegen, z. B.:
-     `signtool=$qC:\Path\signtool.exe$q sign /fd sha256 /a /tr http://timestamp.digicert.com /td sha256 $f`
-   - Danach in **`installer.iss`** die Zeilen `SignTool=signtool` und
-     `SignedUninstaller=yes` entkommentieren. Zertifikate gibt es bei den
-     bekannten CAs (DigiCert, Sectigo, …).
+   signiert die EXE und lässt die meisten Warnungen sofort verschwinden:
+   `signtool sign /fd sha256 /a /tr http://timestamp.digicert.com /td sha256 dist_onefile\Metin2FishBot.exe`
+   Zertifikate gibt es bei den bekannten CAs (DigiCert, Sectigo, …).
 
 4. **Falls du die Warnung lokal überstimmen musst:** den Programmordner in
    Defender als **Ausnahme** hinzufügen (_Windows-Sicherheit ▸ Viren- &
@@ -275,13 +261,13 @@ Das senkt die FP-Rate deutlich, **eliminiert sie aber nicht garantiert**
   Windows-abhängig und konnten in der Build-Umgebung nur **kompiliert**, nicht
   am laufenden Spiel getestet werden → bitte **einmal real verifizieren**
   (loggt jeder Stein `Stein-Farbe erkannt`? Laufen Angeln **und** Puzzle?).
-- **EXE/Ordner zusammenhalten:** Bei der onedir-Variante immer den **ganzen
-  Ordner** verteilen; einzelne `.exe` läuft nicht.
+- **Eine Datei:** Die Portable ist **eine** `.exe` — einfach genau diese Datei
+  weitergeben (keine Begleitdateien nötig).
 - **`config.json`** liegt neben der EXE und merkt sich deine Einstellungen.
   **`puzzle_debug.log`** wird pro Start neu angelegt — zum Festhalten eines
   Fehlers vorher wegkopieren.
 
 ---
 
-_Build-Härtung: upx=False, onedir (COLLECT), PE-Versions-Ressource, gepinnte
-Deps, signierbarer Inno-Setup-Installer. Angel-Teil bewusst byte-stabil._
+_Build-Härtung: upx=False, Portable (onefile), PE-Versions-Ressource, gepinnte
+Deps. Angel-Teil bewusst byte-stabil._

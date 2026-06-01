@@ -181,6 +181,12 @@ def _on_start():
     values = controller.collect_values()
     _arm_stop_after()
     if controller.mode == 'fishing':
+        # Konfigurierbare Hotkeys VOR set_to_begin auf die Instanz injizieren
+        # (analog zur Puzzle-Config-Injektion). Frozen keys via to_values bleiben
+        # unberuehrt; Default '2'/'1' -> byte-stabil.
+        fish_cfg = controller.current_config()['fishing']
+        fishbot.bait_key = fish_cfg['bait_key']
+        fishbot.cast_key = fish_cfg['cast_key']
         fishbot.set_to_begin(values)      # erzeugt wincap, liest frozen keys
         fishbot.botting = True
         puzzlebot.botting = False
@@ -220,6 +226,22 @@ def _tick():
         puzzlebot.botting = False
         _stop_deadline = None
         stop_reason = t('run.reason_time_limit_reached')
+        # Optional die App beenden statt nur stoppen (Setting #4). Default aus
+        # -> reiner Stop -> byte-stabil. Strikt defensiv: nie den Tick kippen.
+        try:
+            if controller.current_config()['window']['close_on_timer_expire']:
+                log.section(t('run.closing_timer_expired'))
+                try:
+                    cfgmod.save(controller.current_config())
+                except Exception:
+                    pass
+                try:
+                    app.after(150, app._on_close)   # Log flushen, dann sauber zu
+                except Exception:
+                    pass
+                return                              # diesen Tick nicht weiterlaufen
+        except Exception:
+            pass
 
     # 2) Bot-Schritt (genau ein Bot tickt, exklusiv).
     try:

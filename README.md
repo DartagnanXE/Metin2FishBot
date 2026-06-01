@@ -34,12 +34,11 @@ behaviour is fully preserved as the default.
 
 Grab the latest build from the **Releases** page:
 
-| File                            | What it is                                                           |
-| ------------------------------- | -------------------------------------------------------------------- |
-| `Metin2FishBot-Portable.exe`    | **Portable** — a single file, just double-click. No installation.    |
-| `Metin2FishBot-Setup-x.y.z.exe` | **Installer** — wizard, Start-menu / desktop shortcuts, uninstaller. |
+| File                         | What it is                                                        |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `Metin2FishBot-Portable.exe` | **Portable** — a single file, just double-click. No installation. |
 
-> Both are **unsigned**. Windows SmartScreen / Defender may show a generic warning
+> It is **unsigned**. Windows SmartScreen / Defender may show a generic warning
 > for any new unsigned app — see [the note below](#-why-does-defender-sometimes-flag-it).
 
 ## 🎮 In-game setup
@@ -60,20 +59,19 @@ Requires **Python 3.11–3.13 (64-bit)** on Windows.
 
 ```bat
 pip install -r requirements.txt
-build.bat            :: -> dist\ (app) and, if Inno Setup is present, installer_output\Setup.exe
+build.bat            :: -> dist_onefile\Metin2FishBot.exe (the portable single file)
 ```
 
-- **Portable single file:** `pyinstaller --noconfirm --distpath dist_onefile Metin2FishBot_onefile.spec`
+- **Portable single file (what `build.bat` does):** `pyinstaller --noconfirm --distpath dist_onefile Metin2FishBot_onefile.spec`
 - **Headless tests:** `python -m unittest discover -s tests`
 
 ## 🦠 Why does Defender sometimes flag it?
 
 Freshly built, **unsigned** PyInstaller executables often trigger _generic
 heuristic_ false-positives (e.g. `Wacatac`). This build is hardened against that
-(no UPX, real PE metadata, onedir layout + installer), but only a **code-signing
-certificate** removes it for certain. The portable single-file build is the most
-likely to be flagged (it self-extracts on launch) — prefer the **installer** if
-you run into this, and you can verify any build on [VirusTotal](https://www.virustotal.com).
+(no UPX, real PE metadata), but only a **code-signing certificate** removes it
+for certain. If you run into a warning, you can verify the build on
+[VirusTotal](https://www.virustotal.com) and report a false positive to Microsoft.
 
 ## 📁 Project layout
 
@@ -81,7 +79,7 @@ you run into this, and you can verify any build on [VirusTotal](https://www.viru
 interface/         new CustomTkinter UI          tools/        HTML companion tools
 images/            template images               tests/        headless test suite
 assets/icon/       app icon (svg / ico / png)    *.spec        PyInstaller build specs
-trained_solver.py  AI puzzle solver (MDP)        installer.iss Inno Setup installer
+trained_solver.py  AI puzzle solver (MDP)        version.py    single version source
 fishingbot.py      fishing core (original)       puzzle.py     puzzle core (original base)
 ```
 

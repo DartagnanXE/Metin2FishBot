@@ -24,5 +24,9 @@ pywin32>=307            # 306 existiert nicht mehr; 307+ deckt Python 3.11-3.13 
 # --- OCR (optional, Angeln: Fischnamen) ---
 pytesseract>=0.3.13     # braucht zusaetzlich die Tesseract-Binary (separat installieren)
 
+# --- System-Tray (optional: "Minimize to tray") ---
+pystray>=0.19.5
+Pillow>=10.0.0          # von pystray + den Tooltip-/Icon-Bildern genutzt
+
 # --- Build ---
 pyinstaller>=6.11.0     # erzeugt die onedir-EXE (siehe Metin2FishBot.spec)

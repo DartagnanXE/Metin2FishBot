@@ -3,6 +3,49 @@
 Alle nennenswerten Aenderungen an diesem Projekt werden hier festgehalten.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 
+## [1.0.4] — 2026-06-01
+
+Grosses UI- und Funktions-Update: komplett neu gestaltete, kompakte Oberflaeche
+plus viele neue Komfort- und Erkennungs-Funktionen. Empfohlenes Update fuer alle.
+
+### Neue Oberflaeche (Cockpit-Sidebar)
+
+- Komplett neues, **kompaktes** Single-Window-Layout mit schlanker **Icon-
+  Navigationsleiste** links: Angeln, Puzzle, Console, Roadmap, Einstellungen.
+- **START/STOP ganz oben** (zeigt waehrend des Laufs, ob Angeln oder Puzzle
+  laeuft) mit **Lauf-Timer daneben** (zaehlt bei gesetztem Limit herunter, sonst
+  die Laufzeit hoch).
+- Spiel-Erkennung dezent unten rechts: **blendet sich aus**, sobald Metin2
+  (800x600) gefunden ist; **prueft jetzt auch die Fenstergroesse** und bietet bei
+  falscher Groesse einen **Ein-Klick "Auf 800x600 setzen"** (resized das Spiel).
+- Inhalt oben gruppiert, feste Fenstergroesse, **kein Scrollen** noetig.
+- Dezente **Versions-/Update-Anzeige** unten links (leuchtet nur bei verfuegbarem
+  Update auf) mit Herkunfts-Tooltip.
+
+### Neue Einstellungen
+
+- **In den Tray minimieren**, **Immer im Vordergrund**, **Schliessen wenn Metin2
+  schliesst**, **Schliessen wenn der Timer ablaeuft**, **Angel-Hotkeys umbelegen**
+  (Koeder-/Angel-Taste frei waehlbar), **Overlay-Deckkraft** regelbar.
+- **Einstellungen zuruecksetzen** (Werkseinstellungen, mit Bestaetigung).
+
+### Board-Erkennung
+
+- **"?"-Hilfebild** zurueck (zeigt, wo die Punkte hingehoeren).
+- Detection-Modi mit **Sicht-Overlay**: **Default/Auto** zeigen ~5 s die Punkte
+  ueber dem Desktop (Ausrichtung pruefen); **"Manuell"** (vorher "Mark") oeffnet
+  beim Umschalten direkt das Markier-Overlay. **Overlay-Deckkraft** einstellbar.
+- Mehrere Metin2-Fenster offen? **Fenster-Auswahl per Klick**.
+
+### Sonstiges
+
+- **Deutsch jetzt mit echten Umlauten** (ae/oe/ue/ss -> ä/ö/ü/ß).
+- Kleiner **"Testfenster"-Knopf** unter Console (oeffnet ein Test-"METIN2"-Fenster
+  zum Ausprobieren ohne echtes Spiel).
+- Neuer **Roadmap-Tab** mit den geplanten Funktionen.
+- **Installer entfaellt:** Auslieferung jetzt ausschliesslich als **Portable**
+  (eine `.exe`, kein Setup, keine Installation) — ein Download, weniger Reibung.
+
 ## [1.0.3] — 2026-05-31
 
 Zwei neue Funktionen: **eingebaute Update-Benachrichtigung** und eine

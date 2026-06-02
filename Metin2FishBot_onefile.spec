@@ -38,6 +38,11 @@ APP_ICON = 'musketier.ico' if os.path.exists('musketier.ico') else None
 ctk_datas = collect_data_files('customtkinter')
 ctk_hidden = collect_submodules('customtkinter') + ['darkdetect']
 
+# tzdata: Windows hat keine IANA-Zeitzonen-DB -> zoneinfo.ZoneInfo('Europe/
+# Berlin') wirft sonst in der EXE. Daten + Submodule mitnehmen (Fisch-Events).
+tz_datas = collect_data_files('tzdata')
+tz_hidden = collect_submodules('tzdata')
+
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
         filevers=_VTUPLE, prodvers=_VTUPLE, mask=0x3F, flags=0x0,
@@ -69,9 +74,10 @@ a = Analysis(
     binaries=[],
     datas=[
         ('images', 'images'),
+        ('inventory_icons', 'inventory_icons'),  # Item-Erkennungs-DB (inventory/)
         ('pieces_second.json', '.'),
         ('fishs.txt', '.'),
-    ] + ctk_datas + ([(APP_ICON, '.')] if APP_ICON else []),
+    ] + ctk_datas + tz_datas + ([(APP_ICON, '.')] if APP_ICON else []),
     hiddenimports=[
         'win32gui', 'win32ui', 'win32con',
         'pydirectinput',
@@ -80,8 +86,14 @@ a = Analysis(
         'pystray', 'PIL', 'PIL.Image', 'PIL._tkinter_finder',   # Tray + Bilder
         # Lazy in app.py-Methoden importiert (statische Analyse uebersieht sie):
         'overlay_preview', 'interface.testwindow',
-        'overlay_mark', 'interface.tray',
-    ] + ctk_hidden + collect_submodules('pystray'),  # pystray laedt sein Backend (pystray._win32) dynamisch -> alle Submodule mitnehmen
+        'overlay_mark', 'overlay_geometry', 'interface.tray',
+        # Run 1: Ranking/Events/Mount -- z.T. lazy in app.py/hack.py importiert.
+        'stats', 'event_window', 'mount',
+        'telemetry', 'telemetry.hwid', 'telemetry.payload', 'telemetry.client',
+        'interface.onboarding', 'interface.ranking_view',
+    ] + ctk_hidden + tz_hidden + collect_submodules('pystray')  # pystray laedt sein Backend (pystray._win32) dynamisch -> alle Submodule mitnehmen
+      + collect_submodules('inventory')  # Inventar-Erkennungs-Engine: noch nicht von Produktionscode importiert -> sonst nicht eingesammelt; inventory_icons/ ist als data oben gebundelt
+      + collect_submodules('interface.app'),  # UI ist jetzt ein PAKET (Orchestrator + Mixins); alle Submodule (_common/controller/*Mixin) mitnehmen
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

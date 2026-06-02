@@ -3,6 +3,38 @@
 Alle nennenswerten Aenderungen an diesem Projekt werden hier festgehalten.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 
+## [Unreleased] — Run-1 Haertung (Statistik/Ranking/Telemetrie-Server)
+
+### Behoben
+
+- **Statistik-Persistenz bei Absturz/Update:** Akkumulierte Laufzeit ging auf
+  manchen Beenden-Pfaden verloren (Fenster schliessen ohne Fang/Loesen, harter
+  `os._exit` beim Auto-Update). Jeder Exit-Pfad sichert die `stats.json` jetzt
+  final atomar (`App._flush_stats` -> in `hack.py` registrierter Hook).
+- **Atomares Speichern unter Last:** `stats.save()` schreibt pro Aufruf in einen
+  eindeutigen Temp-Namen und wiederholt `os.replace` kurz bei transienten
+  Windows-Sharing-Violations (WinError 5). Damit gehen unter gleichzeitigen
+  Schreibern keine Schreibvorgaenge mehr verloren (0/300 statt ~128/300 Fehler),
+  und der Nebenlaeufigkeits-Test ist deterministisch gruen.
+- **Telemetrie nur ueber HTTPS:** Die URL-Validierung lehnt jetzt `http://`
+  (und alle Nicht-`https`-Schemata) ab und faellt auf den HTTPS-Default zurueck
+  — Username/HWID/Stats gehen nie im Klartext ueber die Leitung.
+
+### Server (Artefakte) — Defense-in-Depth
+
+- **IP-Spoofing-Schutz:** Die App vertraut `X-Real-IP` bzw. dem rechtesten
+  `X-Forwarded-For`-Hop (von nginx angehaengt), nie dem faelschbaren linken
+  Eintrag; nginx-`real_ip`-Hinweise im Server-Block + DEPLOY.md.
+- **Beschraenkter Rate-Limiter:** Die In-Process-Bucket-Map wird global geleert
+  (periodisch + ab Obergrenze), schliesst die unbeschraenkte Speicher-Wachstum.
+- **nginx leerer-X-HWID-Bypass geschlossen** (Map auf `$binary_remote_addr`).
+
+### Tests / Doku
+
+- Testsuite auf **533 Tests** aktualisiert (Doku-Zahl korrigiert, vormals
+  faelschlich „126"); Server-Suite **44** gruen. Thread-Timing-Flakiness in den
+  Telemetrie-Sender-Tests beseitigt (ereignisgesteuert statt `sleep`).
+
 ## [1.0.4] — 2026-06-01
 
 Grosses UI- und Funktions-Update: komplett neu gestaltete, kompakte Oberflaeche
@@ -169,7 +201,7 @@ im UI zuschaltbar.
 
 ### Tests
 
-- Headless-Testsuite (reine Logik, ohne GUI/Spiel): **126 Tests gruen**.
+- Headless-Testsuite (reine Logik, ohne GUI/Spiel): **533 Tests gruen**.
 
 ### Unveraendert (bewusst, byte-stabil)
 

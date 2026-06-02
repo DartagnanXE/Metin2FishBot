@@ -1,16 +1,10 @@
-"""Konfigurations-Persistenz fuer das Metin2-Fishing-Bot-UI.
+"""Validierung und Defaults-Merge fuer die Bot-Konfiguration.
 
-Bewusst NUR Python-Standardbibliothek (``json``), damit dieses Modul auch ohne
-GUI-Toolkit ueberall importier- und testbar bleibt und aus der gepackten ``.exe``
-heraus funktioniert.
-
-Die ``config.json`` liegt neben der EXE. Sie haelt ALLE UI-Optionen
-(Modus, Fishing-Timings, Puzzle-Detection/Color/Solver, Log-Sichtbarkeit).
+Reine Logik-Schicht (nur :mod:`copy` aus der Standardbibliothek). Liest die
+erlaubten Wertebereiche/Enums + das ``DEFAULTS``-Schema aus
+:mod:`interface.config.defaults`.
 
 Grundregeln:
-  * Laden wirft NIE -- fehlende/kaputte Datei -> Defaults.
-  * Unbekannte/fehlende Schluessel werden mit Defaults gefuellt (Vorwaerts-/
-    Rueckwaertskompatibilitaet zu alten config.json-Dateien).
   * Validierung klemmt Werte in den erlaubten Bereich und ersetzt ungueltige
     Enums durch ihren Default (statt zu werfen).
   * Immutabilitaet: ``merge_defaults``/``validate`` geben NEUE Dicts zurueck und
@@ -18,87 +12,29 @@ Grundregeln:
 """
 
 import copy
-import json
 
-
-# -- Erlaubte Wertebereiche / Enums (eine einzige Wahrheit) -----------------
-
-DETECTION_MODES = ('default', 'auto', 'mark')
-COLOR_MODES = ('single', 'multi')
-SOLVER_MODES = ('standard', 'trained')
-APP_MODES = ('fishing', 'puzzle')
-COLOR_PATCHES = (3, 5)
-
-# Golden-Tuna-Dialog: welcher der 3 senkrecht gestapelten Knoepfe geklickt
-# wird. 1 = Freilassen, 2 = Aufschneiden, 3 = Als Koeder benutzen (Default).
-GOLDEN_TUNA_ACTIONS = (1, 2, 3)
-
-# Erlaubte Sonderpunkt-Schluessel fuer ``mark_keypoints`` (Overrides der
-# geometry-Defaults). Jeder Wert ist ein [x, y]-Integer-Paar (Referenzkoordinate
-# auf dem 260x170-Board). Unbekannte Schluessel werden bei der Validierung
-# verworfen.
-KEYPOINT_KEYS = ('color', 'getpiece', 'confirm', 'cake')
-
-# Slider-Grenzen fuer die drei Fishing-Timings (Spec: 0.1s - 20s).
-DELAY_MIN = 0.1
-DELAY_MAX = 20.0
-
-# Grenzen fuer die Overlay-Deckkraft (Mark-/Vorschau-Overlay). 0.4 = noch klar
-# durchscheinend (pixelgenaues Platzieren), 1.0 = voll deckend. Default bewusst
-# deckender als der historische 0.45-Wert, weil das alte Overlay zu transparent
-# war. Wird via Tk-Attribut '-alpha' auf beide Overlays angewandt; kein Bot-Wert
-# (taucht NICHT in to_values auf).
-OVERLAY_OPACITY_MIN = 0.4
-OVERLAY_OPACITY_MAX = 1.0
-
-# Erlaubte Hotkey-Tokens fuer Angeln (pydirectinput-Keynamen). Einzelne
-# Ziffern/Buchstaben + eine Whitelist gebraeuchlicher Sondertasten. Ungueltige
-# Eingaben fallen auf den Default zurueck -> kein Crash mitten im Lauf.
-HOTKEY_TOKENS = (
-    'space', 'enter', 'tab', 'esc', 'shift', 'ctrl', 'alt',
-    'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10', 'f11', 'f12',
+from .defaults import (
+    APP_MODES,
+    COLOR_MODES,
+    COLOR_PATCHES,
+    DEFAULTS,
+    DELAY_MAX,
+    DELAY_MIN,
+    DETECTION_MODES,
+    EVENT_WARN_MIN_MAX,
+    GOLDEN_TUNA_ACTIONS,
+    HOTKEY_TOKENS,
+    KEYPOINT_KEYS,
+    OVERLAY_OPACITY_MAX,
+    OVERLAY_OPACITY_MIN,
+    SOLVER_MODES,
+    TELEMETRY_INTERVAL_DEFAULT,
+    TELEMETRY_INTERVAL_MAX,
+    TELEMETRY_INTERVAL_MIN,
+    URL_MAXLEN,
+    USERNAME_MAXLEN,
+    WEEKDAYS,
 )
-
-DEFAULT_CONFIG_PATH = 'config.json'
-
-# Vollstaendiges Default-Schema. Entspricht exakt dem heutigen Verhalten:
-#   * Fishing-Timings 2.0s (wie FishingBot.bait_time/throw_time/game_time = 2),
-#   * Puzzle Detection 'default' (feste Position 270,227),
-#   * Color 'single' (1 Pixel/Zelle), Solver 'standard' (Greedy).
-DEFAULTS = {
-    'version': 1,
-    'language': 'en',
-    'mode': 'fishing',
-    'fishing': {
-        'bait_time': 2.0,
-        'throw_time': 2.0,
-        'start_game_time': 2.0,
-        'stop_after_enabled': False,
-        'stop_after_minutes': 0,
-        'golden_tuna_action': 3,
-        'bait_key': '2',          # In-Game-Taste, die Koeder wirft
-        'cast_key': '1',          # In-Game-Taste, die die Angel auswirft
-    },
-    'puzzle': {
-        'detection_mode': 'default',
-        'mark_offset': None,
-        'mark_size': None,
-        'mark_keypoints': {},
-        'color_mode': 'single',
-        'color_patch': 3,
-        'solver_mode': 'standard',
-        'overlay_opacity': 0.85,  # Deckkraft Mark-/Vorschau-Overlay (0.4..1.0)
-    },
-    'log': {
-        'show_in_ui': True,
-    },
-    'window': {                   # Fenster-/Lifecycle-Optionen (alle Default aus)
-        'always_on_top': False,
-        'minimize_to_tray': False,
-        'close_on_metin2_close': False,
-        'close_on_timer_expire': False,
-    },
-}
 
 
 # -- interne Helfer ---------------------------------------------------------
@@ -144,6 +80,62 @@ def _validate_key(value, fallback):
     if s in HOTKEY_TOKENS:
         return s
     return fallback
+
+
+def _validate_hhmm(value, fallback):
+    """Normalisiert eine 'HH:MM'-Zeit -> 'HH:MM' (00:00..23:59). Sonst
+    ``fallback``. Wirft nie. Ergebnis ist immer zweistellig genullt."""
+    try:
+        hh, mm = str(value).split(':')
+        hour = int(hh)
+        minute = int(mm)
+    except (TypeError, ValueError):
+        return fallback
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return '{:02d}:{:02d}'.format(hour, minute)
+    return fallback
+
+
+def _validate_weekday(value, fallback):
+    """Wochentag 0..6 (Mo=0..So=6). Ungueltig -> ``fallback``. Wirft nie."""
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return day if day in WEEKDAYS else fallback
+
+
+def _validate_url(value, fallback):
+    """Akzeptiert NUR eine ``https://``-URL (auf URL_MAXLEN gekappt), sonst
+    ``fallback``.
+
+    Telemetrie sendet Username + HWID + Stats -- die Spec verlangt HTTPS. Klartext
+    ``http://`` (oder andere Schemata wie ftp:/javascript:/file:) wird daher
+    abgelehnt und faellt auf den HTTPS-Default zurueck, damit nie versehentlich
+    unverschluesselt gesendet wird. Bewusst minimal -- nur Schema + Laenge; KEIN
+    Netzwerk-/DNS-Check (rein, offline-testbar). Wirft nie."""
+    try:
+        s = str(value).strip()
+    except Exception:
+        return fallback
+    if not s:
+        return fallback
+    if not s.lower().startswith('https://'):
+        return fallback
+    return s[:URL_MAXLEN]
+
+
+def _validate_event_window(value, default):
+    """Normalisiert EIN Event-Fenster ``{weekday,start,end}`` gegen ``default``.
+
+    Jedes Feld faellt einzeln auf den passenden Default zurueck (nie werfen).
+    Gibt immer ein NEUES, vollstaendiges Dict zurueck."""
+    src = value if isinstance(value, dict) else {}
+    return {
+        'weekday': _validate_weekday(src.get('weekday'), default['weekday']),
+        'start': _validate_hhmm(src.get('start'), default['start']),
+        'end': _validate_hhmm(src.get('end'), default['end']),
+    }
 
 
 def _deep_merge(base, override):
@@ -215,6 +207,11 @@ def validate(cfg):
             fishing.get('bait_key'), DEFAULTS['fishing']['bait_key'])
         fishing['cast_key'] = _validate_key(
             fishing.get('cast_key'), DEFAULTS['fishing']['cast_key'])
+        # Mount: bool + Hotkey ueber denselben Validator wie Bait/Cast
+        # (ungueltig -> Default '3'). Default AUS -> byte-stabil.
+        fishing['mount_enabled'] = bool(fishing.get('mount_enabled', False))
+        fishing['mount_key'] = _validate_key(
+            fishing.get('mount_key'), DEFAULTS['fishing']['mount_key'])
 
         puzzle = merged['puzzle']
         puzzle['detection_mode'] = _enum(
@@ -249,6 +246,58 @@ def validate(cfg):
             window.get('close_on_metin2_close', False))
         window['close_on_timer_expire'] = bool(
             window.get('close_on_timer_expire', False))
+
+        # Inventar: Hotkey ueber denselben Validator wie Bait/Cast ('i' gueltig;
+        # ungueltig -> 'i'); Auto-Scan ist ein reines bool (vorerst gestubbt).
+        inventory = merged.setdefault('inventory',
+                                      copy.deepcopy(DEFAULTS['inventory']))
+        inventory['hotkey'] = _validate_key(
+            inventory.get('hotkey'), DEFAULTS['inventory']['hotkey'])
+        inventory['auto_scan_after_fishing'] = bool(
+            inventory.get('auto_scan_after_fishing', False))
+
+        # -- Username (einzige PII): gestrippt + auf USERNAME_MAXLEN gekappt.
+        try:
+            name = str(merged.get('username', '')).strip()
+        except Exception:
+            name = ''
+        merged['username'] = name[:USERNAME_MAXLEN]
+
+        # -- Telemetrie: alles defensiv (Default AUS, Platzhalter-URLs, Intervall
+        #    geklemmt). consented merkt die Onboarding-Entscheidung.
+        telemetry = merged.setdefault('telemetry',
+                                      copy.deepcopy(DEFAULTS['telemetry']))
+        telemetry['enabled'] = bool(telemetry.get('enabled', False))
+        telemetry['consented'] = bool(telemetry.get('consented', False))
+        telemetry['submit_url'] = _validate_url(
+            telemetry.get('submit_url'), DEFAULTS['telemetry']['submit_url'])
+        telemetry['leaderboard_url'] = _validate_url(
+            telemetry.get('leaderboard_url'),
+            DEFAULTS['telemetry']['leaderboard_url'])
+        interval = _coerce_int(telemetry.get('interval_s'),
+                               TELEMETRY_INTERVAL_DEFAULT)
+        telemetry['interval_s'] = int(_clamp(
+            interval, TELEMETRY_INTERVAL_MIN, TELEMETRY_INTERVAL_MAX,
+            TELEMETRY_INTERVAL_DEFAULT))
+
+        # -- Fish-Event-Fenster: GENAU zwei (gegen die jeweiligen Defaults
+        #    validiert), warn_minutes geklemmt (0=aus), Zeitzone fix.
+        events = merged.setdefault('events', copy.deepcopy(DEFAULTS['events']))
+        raw_windows = events.get('windows')
+        if not isinstance(raw_windows, list):
+            raw_windows = []
+        default_windows = DEFAULTS['events']['windows']
+        events['windows'] = [
+            _validate_event_window(
+                raw_windows[i] if i < len(raw_windows) else None,
+                default_windows[i])
+            for i in range(len(default_windows))
+        ]
+        warn = _coerce_int(events.get('warn_minutes'), 0)
+        events['warn_minutes'] = int(_clamp(
+            warn, 0, EVENT_WARN_MIN_MAX, 0))
+        # Zeitzone bleibt fix auf Europe/Berlin (Spec) -- kein freies Feld.
+        events['timezone'] = DEFAULTS['events']['timezone']
 
         return merged
     except Exception:
@@ -309,51 +358,9 @@ def _validate_keypoints(value):
     return result
 
 
-def load(path=DEFAULT_CONFIG_PATH):
-    """Laedt und validiert die Konfiguration. Wirft NIE.
-
-    Fehlende oder fehlerhafte Datei -> validierte Defaults (es wird nichts auf
-    die Platte geschrieben; das uebernimmt erst :func:`save`).
-    """
-    try:
-        with open(path, 'r', encoding='utf-8') as handle:
-            raw = json.loads(handle.read())
-    except (OSError, ValueError):
-        return validate(DEFAULTS)
-    except Exception:
-        return validate(DEFAULTS)
-    return validate(raw)
-
-
-def save(cfg, path=DEFAULT_CONFIG_PATH):
-    """Schreibt die (validierte) Konfiguration als JSON. Wirft NIE.
-
-    Gibt ``True`` bei Erfolg, sonst ``False`` (Aufrufer darf den Rueckgabewert
-    ignorieren -- ein Speicherfehler darf den Bot nicht stoppen).
-    """
-    try:
-        normalized = validate(cfg)
-        with open(path, 'w', encoding='utf-8') as handle:
-            handle.write(json.dumps(normalized, indent=2, ensure_ascii=False))
-        return True
-    except Exception:
-        return False
-
-
-def to_values(cfg):
-    """Baut den Fishing-``values``-Dict (frozen keys) aus der Konfiguration.
-
-    Liefert exakt die Schluessel, die ``FishingBot.set_to_begin(values)`` liest
-    (und die ``PuzzleBot.set_to_begin`` ignoriert). So bleibt die Wertekompati-
-    bilitaet zu beiden Bots gewahrt, ohne FreeSimpleGUI.
-    """
-    normalized = validate(cfg)
-    fishing = normalized['fishing']
-    return {
-        '-ENDTIMEP-': bool(fishing['stop_after_enabled']),
-        '-ENDTIME-': str(fishing['stop_after_minutes']),
-        '-BAITTIME-': float(fishing['bait_time']),
-        '-THROWTIME-': float(fishing['throw_time']),
-        '-STARTGAME-': float(fishing['start_game_time']),
-        '-GOLDENTUNA-': int(fishing['golden_tuna_action']),
-    }
+__all__ = [
+    'merge_defaults', 'validate',
+    '_clamp', '_enum', '_coerce_int', '_validate_key', '_validate_hhmm',
+    '_validate_weekday', '_validate_url', '_validate_event_window',
+    '_deep_merge', '_validate_offset', '_validate_size', '_validate_keypoints',
+]

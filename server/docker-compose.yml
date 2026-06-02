@@ -1,0 +1,53 @@
+# Telemetry API -- ONE service on its OWN network + OWN volume.
+# Explicitly NOT attached to any kilab network/volume. Bound to 127.0.0.1 only;
+# nginx reverse-proxies the public subdomain. Least-privilege container.
+#
+# Verify isolation after `docker compose up -d` (see DEPLOY.md):
+#   docker inspect m2fb-telemetry --format '{{json .NetworkSettings.Networks}}'
+#   docker inspect m2fb-telemetry --format '{{.HostConfig.ReadonlyRootfs}}'
+#   docker inspect m2fb-telemetry --format '{{json .Mounts}}'
+
+services:
+  telemetry:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    image: m2fb-telemetry:latest
+    container_name: m2fb-telemetry
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_PORT: "8081"
+      DB_PATH: /data/telemetry.db
+    # Public ONLY via nginx: bind to loopback on the host, never 0.0.0.0.
+    ports:
+      - "127.0.0.1:8081:8081"
+    # Dedicated named volume for the sqlite DB (NOT shared with kilab).
+    volumes:
+      - telemetry_data:/data
+    # Hardening: non-root (set in the image), read-only rootfs + tmpfs for /tmp,
+    # drop ALL caps, no privilege escalation, modest resource limits.
+    user: "app"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 256m
+    networks:
+      - telemetry_net
+
+# OWN network -- do NOT add this service to the kilab network.
+networks:
+  telemetry_net:
+    name: m2fb_telemetry_net
+    driver: bridge
+
+# OWN volume -- do NOT point this at any kilab volume.
+volumes:
+  telemetry_data:
+    name: m2fb_telemetry_data

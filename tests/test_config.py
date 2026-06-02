@@ -231,6 +231,34 @@ class TestNewSettings(unittest.TestCase):
         self.assertEqual(cfg['fishing']['cast_key'], '1')
 
 
+class TestInventorySettings(unittest.TestCase):
+    """Inventory config section: hotkey + (stubbed) auto-scan toggle."""
+
+    def test_inventory_defaults(self):
+        inv = config.validate(config.DEFAULTS)['inventory']
+        self.assertEqual(inv['hotkey'], 'i')
+        self.assertIs(inv['auto_scan_after_fishing'], False)
+
+    def test_inventory_hotkey_invalid_falls_back(self):
+        cfg = config.validate({'inventory': {'hotkey': 'nope'}})
+        self.assertEqual(cfg['inventory']['hotkey'], 'i')
+
+    def test_inventory_hotkey_uppercased(self):
+        cfg = config.validate({'inventory': {'hotkey': 'I'}})
+        self.assertEqual(cfg['inventory']['hotkey'], 'i')
+
+    def test_inventory_auto_scan_bool_coerced(self):
+        cfg = config.validate({'inventory': {'auto_scan_after_fishing': 1}})
+        self.assertIs(cfg['inventory']['auto_scan_after_fishing'], True)
+
+    def test_old_config_without_inventory_merges(self):
+        # Alte config.json ohne inventory -> Default-Sektion aufgefuellt.
+        cfg = config.validate({'mode': 'puzzle'})
+        self.assertIn('inventory', cfg)
+        self.assertEqual(cfg['inventory']['hotkey'], 'i')
+        self.assertIs(cfg['inventory']['auto_scan_after_fishing'], False)
+
+
 class TestOverlayOpacity(unittest.TestCase):
     def _opacity(self, value):
         cfg = config.validate({'puzzle': {'overlay_opacity': value}})
@@ -271,13 +299,15 @@ class TestToValues(unittest.TestCase):
         v = config.to_values(config.DEFAULTS)
         self.assertEqual(set(v), {'-ENDTIMEP-', '-ENDTIME-',
                                   '-BAITTIME-', '-THROWTIME-', '-STARTGAME-',
-                                  '-GOLDENTUNA-'})
+                                  '-GOLDENTUNA-', '-MOUNT-', '-MOUNTKEY-'})
         self.assertIsInstance(v['-ENDTIMEP-'], bool)
         self.assertIsInstance(v['-ENDTIME-'], str)
         self.assertIsInstance(v['-BAITTIME-'], float)
         self.assertIsInstance(v['-THROWTIME-'], float)
         self.assertIsInstance(v['-STARTGAME-'], float)
         self.assertIsInstance(v['-GOLDENTUNA-'], int)
+        self.assertIsInstance(v['-MOUNT-'], bool)
+        self.assertIsInstance(v['-MOUNTKEY-'], str)
 
     def test_golden_tuna_carried_as_int(self):
         v = config.to_values({'fishing': {'golden_tuna_action': 1}})

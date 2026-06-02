@@ -28,5 +28,12 @@ pytesseract>=0.3.13     # braucht zusaetzlich die Tesseract-Binary (separat inst
 pystray>=0.19.5
 Pillow>=10.0.0          # von pystray + den Tooltip-/Icon-Bildern genutzt
 
+# --- Zeitzonen (Fish-Event-Fenster Europe/Berlin, DST-korrekt) ---
+# Windows liefert KEINE IANA-Zeitzonendatenbank -> zoneinfo.ZoneInfo('Europe/
+# Berlin') wirft ohne dieses Paket. MUSS in beiden .spec-Dateien mitgepackt
+# werden (collect_data('tzdata') / hiddenimports), sonst kennt die EXE die
+# Zeitzone nicht. event_window.py degradiert sonst zu 'unknown' (kein Crash).
+tzdata>=2024.1
+
 # --- Build ---
 pyinstaller>=6.11.0     # erzeugt die onedir-EXE (siehe Metin2FishBot.spec)

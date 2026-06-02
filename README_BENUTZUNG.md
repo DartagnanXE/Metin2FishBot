@@ -31,7 +31,8 @@ gehärteter **Portable**-Build gegen False-Positive-Virenwarnungen.
 - **Gehärteter Build:** Portable EXE ohne UPX, mit echten **PE-Metadaten** und
   gepinnten Abhängigkeiten. Das senkt generische Virenwarnungen (Wacatac & Co.)
   — Details + ehrliches Restrisiko in §8.
-- **126 automatische Tests** sichern die Solver- und Erkennungs-Logik ab.
+- **533 automatische Tests** sichern Solver-, Erkennungs-, Config-, Event-Zeit-,
+  Statistik- und Telemetrie-Logik ab (rein, ohne GUI/Spiel).
 
 ---
 
@@ -198,8 +199,9 @@ der EXE. Achte auf:
 python -m unittest discover -s tests -v
 ```
 
-Erwartung: `Ran 126 tests ... OK`. (Diese Tests prüfen reine Logik —
-Solver, KI-Solver, Config, Farb- und Board-Erkennung — ohne GUI/Windows.)
+Erwartung: `Ran 533 tests ... OK`. (Diese Tests prüfen reine Logik —
+Solver, KI-Solver, Config, Farb- und Board-Erkennung, Event-Zeitfenster inkl.
+Sommer-/Winterzeit, Statistik-Zähler und Telemetrie — ohne GUI/Windows.)
 
 ---
 

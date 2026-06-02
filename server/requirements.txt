@@ -1,0 +1,5 @@
+# Telemetry server deps -- pinned, minimal, in its OWN container.
+# NOTHING here can reach the kilab stack. Separate from the client requirements.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4

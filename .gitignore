@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# Runtime output: best-effort crops of unrecognised inventory items
+# (saved next to the EXE / repo root by interface.inventory_runner).
+inventory_unknowns/
+
 # Distribution / packaging
 .Python
 build/
@@ -137,6 +141,13 @@ installer_output/
 # Laufzeit-erzeugte Dateien (Strategie-Cache / Einstellungen / Diagnose):
 trained_V.npy
 config.json
+stats.json
+stats.json.tmp
+# Telemetrie-Server: lokale Secrets + sqlite-DB (nie committen):
+server/.env
+*.db
+*.db-wal
+*.db-shm
 # Die generische Python-Regel oben ignoriert *.spec -- unsere beiden
 # PyInstaller-Specs sind aber handgepflegter, ESSENZIELLER Quellcode:
 !Metin2FishBot.spec

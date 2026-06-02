@@ -1,66 +1,23 @@
-import numpy as np
 import pydirectinput
 import cv2 as cv
-import math
-from time import time
+from time import time, sleep
 from windowcapture import WindowCapture
 from hsvfilter import HsvFilter
 from fishfilter import Filter
 from i18n import t
 from respath import resource_path
 import constants
+import mount
 
-# Diagnose-Logging (stdlib-only, defensiv) -- macht das Angeln in der Live-
-# Console sichtbar. Schlaegt der Import fehl, laeuft der Bot unveraendert weiter.
-try:
-    from debuglog import log
-except Exception:  # pragma: no cover
-    log = None
-
-
-def _flog(state, message, **fields):
-    """Loggt ein Angel-Event (falls debuglog verfuegbar). Wirft nie."""
-    if log is None:
-        return
-    try:
-        log.event(state, message, **fields)
-    except Exception:
-        pass
+# Reine Such-/Logging-Primitive (zustandslos) leben in fishing_match; HIER in den
+# Namespace re-importiert, damit (a) die Detect-Methoden sie als bare globale
+# Namen aufloesen und (b) Tests, die ``fishingbot._match_template_max`` direkt
+# aufrufen, unveraendert funktionieren.
+from fishing_match import _flog, _match_template_max  # noqa: F401  (re-export)
+from fishing_detect import FishingDetectMixin
 
 
-def _match_template_max(haystack, needle):
-    """Robustes matchTemplate -> (ok, max_val, max_loc).
-
-    Bringt das Suchbild defensiv auf den Vorlagen-Typ (kontiguierlich, gleiche
-    Kanalzahl, Vorlage <= Bild) und faengt JEDEN cv2-Fehler ab -> ok=False statt
-    Absturz. So kann ein abweichendes Capture (Form/Typ/DPI-Skalierung) Fishing
-    nicht mehr crashen; es wird sauber als 'nicht erkannt' behandelt + geloggt.
-    """
-    try:
-        if haystack is None or needle is None:
-            return (False, 0.0, (0, 0))
-        img = np.ascontiguousarray(haystack)
-        if img.ndim == 2:
-            img = cv.cvtColor(img, cv.COLOR_GRAY2BGR)
-        elif img.ndim == 3 and img.shape[2] == 4:
-            img = cv.cvtColor(img, cv.COLOR_BGRA2BGR)
-        if (img.ndim != 3 or needle.ndim != 3
-                or img.shape[2] != needle.shape[2]
-                or needle.shape[0] > img.shape[0]
-                or needle.shape[1] > img.shape[1]):
-            _flog('-', t('fishing.match_skipped'),
-                  img=str(getattr(img, 'shape', None)),
-                  tmpl=str(getattr(needle, 'shape', None)))
-            return (False, 0.0, (0, 0))
-        result = cv.matchTemplate(img, needle, cv.TM_CCOEFF_NORMED)
-        _minv, maxv, _minl, maxl = cv.minMaxLoc(result)
-        return (True, float(maxv), maxl)
-    except Exception as exc:
-        _flog('-', t('fishing.match_error'), detail=str(exc)[:90])
-        return (False, 0.0, (0, 0))
-
-
-class FishingBot:
+class FishingBot(FishingDetectMixin):
 
     #properties
     fish_pos_x = None
@@ -143,6 +100,17 @@ class FishingBot:
     bait_key = '2'
     cast_key = '1'
 
+    # Mount-Animation-Cancel (Default AUS -> byte-stabil). Wird in set_to_begin
+    # aus den values ('-MOUNT-'/'-MOUNTKEY-') gelesen. Nach einem bestaetigten
+    # Minispiel-Ende drueckt der Bot die Taste, wartet 0.1s, drueckt erneut
+    # (auf-/absteigen) -> bricht die Fang-Animation ab -> schneller neu auswerfen.
+    mount_enabled = False
+    mount_key = '3'
+
+    # Counter-Hook: einmal pro bestaetigtem Fang aufgerufen (von hack.py gesetzt).
+    # None -> kein Hook (FishingBot bleibt von stats.py entkoppelt).
+    on_catch = None
+
     # Golden-Tuna: welches der 3 Dialogfelder geklickt wird (Default 3 = Koeder).
     golden_tuna_action = 3
 
@@ -158,71 +126,10 @@ class FishingBot:
     _casts_without_bite = 0
     _best_minigame_conf = 0.0   # beste Uhr-Trefferguete dieser Runde (Diagnose)
 
-    def detect(self, haystack_img):
-
-        # match the needle_image with the hasytack image (robust: ein abweichendes
-        # Capture darf KEINEN cv2-Crash ausloesen -> dann "kein Fisch" (None)).
-        ok, max_val, max_loc = _match_template_max(haystack_img, self.needle_img)
-        if not ok:
-            return None
-
-        # needle_image's dimensions
-        needle_w = self.needle_img.shape[1]
-        needle_h = self.needle_img.shape[0]
-
-        # get the position of the match image
-        top_left = max_loc
-        bottom_right = (top_left[0] + needle_w, top_left[1] + needle_h)
-
-        # Draw the circle of the fish limits
-        cv.circle(haystack_img,
-                (int(haystack_img.shape[1] / 2), int(haystack_img.shape[0] / 2)),
-                self.FISH_RANGE, color=(0, 0, 255), thickness=1)
-
-        # Only the max level of match is greater than 0.5
-        if max_val > 0.5:
-            pos_x = (top_left[0] + bottom_right[0])/2
-            pos_y = (top_left[1] + bottom_right[1])/2
-
-            if self.fish_last_time:
-                dist = math.sqrt((pos_x - self.fish_pos_x)**2 + (self.fish_pos_y - pos_y)**2)
-                cv.rectangle(haystack_img, top_left, bottom_right,
-                            color=(0, 255, 0), thickness=2, lineType=cv.LINE_4)
-
-                # Calculate the fish velocity
-                velo = dist/(time() - self.fish_last_time)
-
-                if velo == 0.0:
-                    return (pos_x, pos_y, True)
-                elif velo >= 150:
-
-                    # With this velocity the fish position will be predict
-
-                    pro = self.FISH_VELO_PREDICT / dist
-                    destiny_x = int(pos_x + (pos_x - self.fish_pos_x) * pro)
-                    destiny_y = int(pos_y + (pos_y - self.fish_pos_y) * pro)
-
-                    # Draw the predict line
-
-                    cv.line(haystack_img, (int(pos_x), int(pos_y)),
-                            (destiny_x, destiny_y), (0, 255, 0),  thickness=3)
-
-                    return (destiny_x, destiny_y, False)
-
-            # get the fish position and the time
-
-            self.fish_pos_x = pos_x
-            self.fish_pos_y = pos_y
-            self.fish_last_time = time()
-
-        return None
-
-    def detect_minigame(self, haystack_img):
-        # Robust gegen Form-/Typ-Abweichungen des Captures (kein Crash mehr).
-        ok, max_val, _ = _match_template_max(haystack_img, self.needle_img_clock)
-        if ok and max_val > self._best_minigame_conf:
-            self._best_minigame_conf = max_val
-        return ok and max_val > 0.9
+    # Die reinen Erkennungs-Methoden detect / detect_minigame / detect_daily_reward
+    # liefert der FishingDetectMixin (oben eingemischt) -- gleiche Methoden-
+    # aufloesung, gleicher self.-Zustand. Hier verbleibt die zustandsbehaftete
+    # Cast-/State-Machine.
 
     def _on_cycle_end(self):
         """Nach JEDER Angel-Runde aufrufen: zaehlt aufeinanderfolgende Runden
@@ -247,14 +154,30 @@ class FishingBot:
         self._bite_seen_this_cycle = False
         self._best_minigame_conf = 0.0
 
-    def detect_daily_reward(self, image):
+    def _fire_on_catch(self):
+        """Ruft den (optionalen) Counter-Hook genau einmal pro Fang. Wirft nie --
+        hack.py setzt ``on_catch``; ist er None, passiert nichts (Entkopplung)."""
+        callback = self.on_catch
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            pass
 
-        for i in range(0, 5):
-            for j in range(0, 5):
-                if int(image[10 + i,10 +  j, 0]) + int(image[10 + i,10 +  j, 1]) + int(image[10 + i,10 +  j, 2]) > 0:
-                    return False
-
-        return True
+    def _do_mount_cancel(self, steps):
+        """Fuehrt die PURE Mount-Sequenz (mount.mount_cancel_steps) als
+        Tastendruecke aus: ('press', key) -> keyDown/keyUp, ('sleep', s) ->
+        sleep. Reiner Thin-Executor; die Logik liegt in mount.py. Wirft nie."""
+        try:
+            for action, value in steps:
+                if action == 'press':
+                    pydirectinput.keyDown(value)
+                    pydirectinput.keyUp(value)
+                elif action == 'sleep':
+                    sleep(value)
+        except Exception:
+            pass
 
     def set_to_begin(self, values):
 
@@ -282,6 +205,13 @@ class FishingBot:
         except (TypeError, ValueError):
             action = 3
         self.golden_tuna_action = action if action in (1, 2, 3) else 3
+
+        # Mount-Animation-Cancel defensiv aus den frozen keys lesen (Default
+        # AUS/'3' -> byte-stabil). Ein fehlender/kaputter Wert darf nichts
+        # brechen.
+        self.mount_enabled = bool(values.get('-MOUNT-', False))
+        mkey = values.get('-MOUNTKEY-', '3')
+        self.mount_key = str(mkey) if mkey else '3'
 
         # FRUEH loggen -- noch VOR dem Fenster-Capture, damit der Start auch dann
         # in der Console steht, wenn das Spielfenster (noch) nicht gefunden wird
@@ -320,11 +250,13 @@ class FishingBot:
         screenshot = self.wincap.get_screenshot()
 
         # crop and aply hsv filter
+        # detect_end_img ist der ROHE Crop (View), crop_img wird gefiltert. Beide
+        # gehen vom IDENTISCHEN Ausschnitt aus -> einmal schneiden statt zweimal.
+        # apply_hsv_filter liefert ein NEUES Array (mutiert die Eingabe nicht), der
+        # rohe Crop bleibt also unveraendert -- byte-stabil zum frueheren Verhalten.
         crop_img = screenshot[self.FISH_WINDOW_POSITION[1]:self.FISH_WINDOW_POSITION[1]+self.FISH_WINDOW_SIZE[1],
                             self.FISH_WINDOW_POSITION[0]:self.FISH_WINDOW_POSITION[0]+self.FISH_WINDOW_SIZE[0]]
-        
-        detect_end_img = screenshot[self.FISH_WINDOW_POSITION[1]:self.FISH_WINDOW_POSITION[1]+self.FISH_WINDOW_SIZE[1],
-                            self.FISH_WINDOW_POSITION[0]:self.FISH_WINDOW_POSITION[0]+self.FISH_WINDOW_SIZE[0]]
+        detect_end_img = crop_img
         crop_img = self.hsv_filter.apply_hsv_filter(crop_img)
 
         cv.putText(crop_img, 'FPS: ' + str(1/(time() - self.loop_time))[:2],
@@ -408,6 +340,13 @@ class FishingBot:
                 # SMART: echtes Rundenende vs. "nie ein Minispiel gesehen".
                 if self._bite_seen_this_cycle:
                     _flog(0, t('fishing.minigame_finished'))
+                    # BESTAETIGTER Fang: Counter-Hook feuern (einmal) + optional
+                    # die Fang-Animation per Mount-Toggle abbrechen. Beides streng
+                    # defensiv -- darf den Angel-Loop nie kippen.
+                    self._fire_on_catch()
+                    if self.mount_enabled:
+                        self._do_mount_cancel(mount.mount_cancel_steps(
+                            self.mount_key))
                 else:
                     _flog(0, t('fishing.no_bite'))
                 self._on_cycle_end()
@@ -458,13 +397,5 @@ class FishingBot:
 
                     pydirectinput.click(x=mouse_x, y=mouse_y)
                     _flog(3, t('fishing.fish_clicked'), x=mouse_x, y=mouse_y)
-
-        '''
-        cv.imshow('Minha Janela', crop_img)
-
-        if cv.waitKey(1) == ord('q'):
-            cv.destroyAllWindows()
-            return True
-        '''
 
         return crop_img

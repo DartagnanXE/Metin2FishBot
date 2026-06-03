@@ -383,7 +383,7 @@ TRANSLATIONS = {
     'ui.ranking_sub': {'en': 'The top 20 by catches', 'de': 'Die Top 20 nach Fängen'},
     'ui.stats_title': {'en': 'Your stats', 'de': 'Deine Statistik'},
     'ui.stats_catches': {'en': 'Catches', 'de': 'Fänge'},
-    'ui.stats_puzzles': {'en': 'Puzzles solved', 'de': 'Gelöste Puzzles'},
+    'ui.stats_puzzles': {'en': 'Puzzle', 'de': 'Puzzle'},
     'ui.stats_fishing_time': {'en': 'Fishing time', 'de': 'Angel-Zeit'},
     'ui.stats_puzzler_time': {'en': 'Puzzle time', 'de': 'Puzzle-Zeit'},
     'ui.event_status_title': {'en': 'Fish event', 'de': 'Fisch-Event'},

@@ -33,8 +33,22 @@ from i18n import t
 from interface import config as cfgmod
 from interface.ranking_rows import (entry_fields as _entry_fields,
                                      hms as _hms, row_rank as _row_rank)
-from interface.widgets import (PANEL, PANEL_LIGHT, TEAL, TEAL_BRIGHT, TEAL_SOFT,
-                               TEXT, TEXT_FAINT, TEXT_MUTED)
+from interface.widgets import (PANEL, PANEL_DARK, PANEL_LIGHT, TEAL_BRIGHT,
+                               TEAL_SOFT, TEXT, TEXT_FAINT, TEXT_MUTED)
+
+# -- Leaderboard-Politur (dezente, themenkonforme Akzente) ------------------
+# Zebra: gerade/ungerade Datenzeilen wechseln den Hintergrund (das gewuenschte
+# "1-2-1-2"). Beide Toene liegen sehr nah am Karten-PANEL, damit das Raster
+# ruhig bleibt und nicht "bunt" wirkt. Header + eigene Zeile heben sich davon ab.
+ROW_BG_A = PANEL          # Zeilen 1,3,5 ... (wie die Karte)
+ROW_BG_B = PANEL_LIGHT    # Zeilen 2,4,6 ... (einen Hauch heller -> Zebra)
+HEADER_BG = PANEL_DARK    # Spaltenkopf-Band (dunkler abgesetzt)
+MINE_BG = TEAL_SOFT       # eigene Zeile: opakes ~12%-Teal-Band
+MINE_RAIL = TEAL_BRIGHT   # schmaler Akzentstreifen links an der eigenen Zeile
+
+# Top-3-Raenge: dezente Medaillen-Toene NUR auf der Rang-Zahl (kein greller
+# Vollflaechen-Effekt). Gold/Silber/Bronze, dunkel genug fuers Teal/Dark-Theme.
+MEDAL_COLORS = {1: '#f5c451', 2: '#c4cdd6', 3: '#cd8e57'}
 
 # Top-N shown on the board. When the user's true rank is > TOP_N, the TOP_N-th
 # displayed row is replaced with the user's own row (real rank). Mirrors the
@@ -88,11 +102,13 @@ def build_ranking_view(app, parent):
             font=ctk.CTkFont(size=ROW_FONT_SIZE))
         app._rank_notice.grid(row=1, column=0, sticky='w', pady=(2, 1))
 
-        # Board body (compact rows of rank/name/catches/puzzles).
+        # Board body (each entry is rendered as a full-width colored band by
+        # ``_board_row``). The bands span the body's columns, so column 0 carries
+        # the stretch weight -> every band fills the card gutter-to-gutter.
         app._rank_board_body = ctk.CTkFrame(board_card.body,
                                             fg_color='transparent')
         app._rank_board_body.grid(row=2, column=0, sticky='ew', pady=(1, 0))
-        app._rank_board_body.grid_columnconfigure(1, weight=1)
+        app._rank_board_body.grid_columnconfigure(0, weight=1)
 
         # Auto-fetch the leaderboard once on build.
         refresh_leaderboard(app)
@@ -378,27 +394,83 @@ def _render_board(app, entries, username, self_row=None):
 
 def _board_row(body, row, rank, name, catches, puzzles, header=False,
                mine=False):
-    """Render ONE compact board row (4 columns) at grid ``row``.
+    """Render ONE polished board row (4 columns) as a full-width colored band.
 
-    Compact so 1 header + TOP_N data rows fit the fixed 608px window with no
-    scroll: ``ROW_FONT_SIZE`` (>= 9, readable) + a fixed ``ROW_HEIGHT`` per label
-    + zero inter-row pady. Header stays bold/teal-faint; the user's own row stays
-    bold/teal-bright (``mine``)."""
-    color = TEAL_BRIGHT if mine else (TEXT_FAINT if header else TEXT)
+    Each row is now its OWN ``CTkFrame`` band placed at grid ``row`` (the layout
+    stays one band per entry). The band colour encodes the row's role:
+
+      * header  -> a darker column-head band (bold, teal-faint text);
+      * mine    -> a teal-soft band + a thin teal accent rail on the left edge;
+      * data    -> ZEBRA: even/odd rows alternate ``ROW_BG_A``/``ROW_BG_B`` (the
+                   "1-2-1-2"). Rank 1/2/3 additionally tint just the rank number
+                   gold/silver/bronze (``MEDAL_COLORS``) -- a dezent top-3 accent.
+
+    The labels live INSIDE the band (so the colour fills the whole row, gutter to
+    gutter). The 4 inner columns mirror the body's column weights so every row
+    lines up perfectly -> a clean implied grid without heavy separators. Still
+    compact (``ROW_FONT_SIZE`` + fixed ``ROW_HEIGHT``) so 1 header + TOP_N rows
+    fit the fixed window without a scrollbar. Never raises (defensive band)."""
+    # Band-Hintergrund je nach Rolle (Zebra fuer normale Datenzeilen).
+    if header:
+        band_bg = HEADER_BG
+    elif mine:
+        band_bg = MINE_BG
+    else:
+        band_bg = ROW_BG_A if (row % 2 == 1) else ROW_BG_B
+
+    # Header oben/unten leicht abgerundet wirken lassen; Datenbaender bleiben
+    # rechteckig, damit das Zebra als durchgehendes Raster liest.
+    band = ctk.CTkFrame(body, fg_color=band_bg,
+                        corner_radius=(6 if header else 0))
+    band.grid(row=row, column=0, columnspan=4, sticky='ew',
+              pady=(0, 2 if header else 1))
+    # Innere Spalten exakt wie die alten Body-Spalten (Name dehnt sich).
+    band.grid_columnconfigure(0, weight=0)
+    band.grid_columnconfigure(1, weight=1)
+    band.grid_columnconfigure(2, weight=0)
+    band.grid_columnconfigure(3, weight=0)
+
+    # Schmaler Teal-Akzentstreifen links an der EIGENEN Zeile (dezente Marke).
+    # Per ``place`` als reines Overlay an der linken Kante -> belegt KEINE
+    # Grid-Zelle, daher bleibt die Spaltenausrichtung mit den anderen Zeilen
+    # exakt gleich. Defensiv: scheitert place, bleibt nur das Teal-Band.
+    if mine and not header:
+        try:
+            rail = ctk.CTkFrame(band, fg_color=MINE_RAIL, width=3,
+                                corner_radius=0)
+            rail.place(relx=0.0, rely=0.0, relheight=1.0, width=3)
+        except Exception:
+            pass
+
+    text_color = TEAL_BRIGHT if mine else (TEXT_FAINT if header else TEXT)
     weight = 'bold' if (header or mine) else 'normal'
     font = ctk.CTkFont(size=ROW_FONT_SIZE, weight=weight)
-    ctk.CTkLabel(body, text=rank, width=30, height=ROW_HEIGHT, anchor='w',
-                 text_color=color, font=font).grid(
-        row=row, column=0, sticky='w', pady=0)
-    ctk.CTkLabel(body, text=name, height=ROW_HEIGHT, anchor='w',
-                 text_color=color, font=font).grid(
-        row=row, column=1, sticky='w', padx=(4, 4), pady=0)
-    ctk.CTkLabel(body, text=catches, width=46, height=ROW_HEIGHT, anchor='e',
-                 text_color=color, font=font).grid(
-        row=row, column=2, sticky='e', padx=(0, 6), pady=0)
-    ctk.CTkLabel(body, text=puzzles, width=46, height=ROW_HEIGHT, anchor='e',
-                 text_color=color, font=font).grid(
-        row=row, column=3, sticky='e', pady=0)
+
+    # Rang: Top-3 bekommen einen Medaillen-Ton (nur die Zahl), sofern es nicht
+    # der Header und nicht die ohnehin teal hervorgehobene eigene Zeile ist.
+    rank_color = text_color
+    if not header and not mine:
+        try:
+            rank_color = MEDAL_COLORS.get(int(str(rank).lstrip('#')),
+                                          text_color)
+        except Exception:
+            rank_color = text_color
+    rank_weight = 'bold' if (header or mine or rank_color != text_color) \
+        else 'normal'
+    rank_font = ctk.CTkFont(size=ROW_FONT_SIZE, weight=rank_weight)
+
+    ctk.CTkLabel(band, text=rank, width=30, height=ROW_HEIGHT, anchor='w',
+                 text_color=rank_color, font=rank_font).grid(
+        row=0, column=0, sticky='w', padx=(8, 0), pady=0)
+    ctk.CTkLabel(band, text=name, height=ROW_HEIGHT, anchor='w',
+                 text_color=text_color, font=font).grid(
+        row=0, column=1, sticky='w', padx=(6, 4), pady=0)
+    ctk.CTkLabel(band, text=catches, width=46, height=ROW_HEIGHT, anchor='e',
+                 text_color=text_color, font=font).grid(
+        row=0, column=2, sticky='e', padx=(0, 8), pady=0)
+    ctk.CTkLabel(band, text=puzzles, width=52, height=ROW_HEIGHT, anchor='e',
+                 text_color=text_color, font=font).grid(
+        row=0, column=3, sticky='e', padx=(0, 8), pady=0)
 
 
 def _clear_board(app):

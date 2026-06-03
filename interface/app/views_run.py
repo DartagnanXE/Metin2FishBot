@@ -146,6 +146,19 @@ class FishingPuzzleConsoleViewsMixin:
             command=self._on_solver_change, info=t('ui.puzzle_method_help'))
         self.solver_seg.grid(row=0, column=0, sticky='ew')
 
+        # "Force Deluxe"-Schalter DIREKT unter der Solver-Auswahl (V3-Reservat-
+        # Strategie). Eigene ?-Hilfe mit dem ehrlichen Mathe-Trade-off; nur
+        # wirksam bei 'KI optimiert' + vorhandener Deluxe-Box (sonst Standard-
+        # Verhalten). Reicht den Toggle ueber _on_force_deluxe_toggle in die
+        # Config; waehrend des Laufs gesperrt (sync_controls).
+        sbody.grid_columnconfigure(0, weight=1)
+        self._force_deluxe_var = ctk.BooleanVar(
+            value=bool(self._cfg['puzzle'].get('force_deluxe', False)))
+        self.force_deluxe_switch = self._switch_row(
+            sbody, 1, t('ui.force_deluxe'), None, t('ui.force_deluxe_help'),
+            self._force_deluxe_var, self._on_force_deluxe_toggle,
+            return_switch=True)
+
     def _build_console_view(self, _parent):
         view = self._new_view('console')
         view.grid_rowconfigure(1, weight=1)

@@ -27,6 +27,11 @@ if _REPO_ROOT not in sys.path:
 
 import deluxe  # noqa: E402  (reale Produktionslogik, stdlib-only)
 
+try:  # numpy nur fuer die read_deluxe_count-Bildpfad-Tests (sonst skip)
+    import numpy as np
+except Exception:  # pragma: no cover
+    np = None
+
 
 # -- Spiegel der 6 echten Steinfarben (muss PuzzleBot.PIECE_REF_BGR gleichen) --
 PIECE_REF_BGR = {
@@ -194,6 +199,109 @@ class TestDeluxeForm(unittest.TestCase):
 
     def test_type_is_disjoint_from_real_pieces(self):
         self.assertNotIn(deluxe.DELUXE_PIECE_TYPE, (1, 2, 3, 4, 5, 6))
+
+
+class TestReservat2x3(unittest.TestCase):
+    """V3-Reservat: feste 6 Zellen unten-rechts, frozenset, ins Brett passend."""
+
+    def test_anchor_is_bottom_right(self):
+        self.assertEqual(deluxe.RESERVAT_ANCHOR, (2, 3))
+
+    def test_exact_six_cells(self):
+        self.assertEqual(
+            deluxe.reservat_2x3(),
+            frozenset({(2, 3), (2, 4), (2, 5), (3, 3), (3, 4), (3, 5)}))
+
+    def test_is_frozenset(self):
+        self.assertIsInstance(deluxe.reservat_2x3(), frozenset)
+
+    def test_cells_are_in_bounds(self):
+        for (r, c) in deluxe.reservat_2x3():
+            self.assertTrue(0 <= r < 4 and 0 <= c < 6)
+
+    def test_matches_find_free_2x3_on_otherwise_full_board(self):
+        # Sind die 18 Nicht-Reservat-Zellen voll, MUSS find_free_2x3 genau den
+        # Reservat-Anker liefern -> _place_deluxe trifft das Reservat.
+        reservat = deluxe.reservat_2x3()
+        board = [[0 if (i, j) in reservat else 1 for j in range(6)]
+                 for i in range(4)]
+        self.assertEqual(deluxe.find_free_2x3(board), deluxe.RESERVAT_ANCHOR)
+
+    def test_form_matches_anchor_plus_deluxe_form(self):
+        # reservat_2x3 == RESERVAT_ANCHOR + DELUXE_FORM (konsistente Definition).
+        ar, ac = deluxe.RESERVAT_ANCHOR
+        expected = frozenset((ar + dr, ac + dc) for (dr, dc) in deluxe.DELUXE_FORM)
+        self.assertEqual(deluxe.reservat_2x3(), expected)
+
+
+class TestReservatIsEmpty(unittest.TestCase):
+    @staticmethod
+    def _empty():
+        return [[0] * 6 for _ in range(4)]
+
+    def test_empty_board_reservat_empty(self):
+        self.assertTrue(deluxe.reservat_is_empty(self._empty()))
+
+    def test_one_reservat_cell_set_is_not_empty(self):
+        for (r, c) in deluxe.reservat_2x3():
+            board = self._empty()
+            board[r][c] = 1
+            with self.subTest(cell=(r, c)):
+                self.assertFalse(deluxe.reservat_is_empty(board))
+
+    def test_non_reservat_cells_full_but_reservat_empty(self):
+        # Die 18 Nicht-Reservat-Zellen belegt, Reservat frei -> empty == True.
+        reservat = deluxe.reservat_2x3()
+        board = [[0 if (i, j) in reservat else 1 for j in range(6)]
+                 for i in range(4)]
+        self.assertTrue(deluxe.reservat_is_empty(board))
+
+    def test_defensive_on_bad_input(self):
+        # Kein/zu kleines/kaputtes Brett -> False (nicht leer), nie Crash.
+        self.assertFalse(deluxe.reservat_is_empty(None))
+        self.assertFalse(deluxe.reservat_is_empty([]))
+        self.assertFalse(deluxe.reservat_is_empty([[0, 0, 0]]))
+        self.assertFalse(deluxe.reservat_is_empty('garbage'))
+
+    def test_does_not_mutate_board(self):
+        board = [[(i + j) % 2 for j in range(6)] for i in range(4)]
+        snap = copy.deepcopy(board)
+        deluxe.reservat_is_empty(board)
+        self.assertEqual(board, snap)
+
+
+class TestReadDeluxeCount(unittest.TestCase):
+    """read_deluxe_count: STRIKT defensiv -- Fehler/None -> 0 (nie Crash)."""
+
+    def test_none_screenshot_is_zero(self):
+        self.assertEqual(deluxe.read_deluxe_count(None), 0)
+
+    def test_none_with_explicit_center_is_zero(self):
+        self.assertEqual(deluxe.read_deluxe_count(None, (503, 271)), 0)
+
+    @unittest.skipUnless(np is not None, 'numpy required for image path')
+    def test_garbage_shapes_return_zero(self):
+        # 1D / 2D / leeres Array: extract_slot lehnt ab oder OCR scheitert -> 0.
+        for bad in (np.zeros((5,), dtype=np.uint8),
+                    np.zeros((4, 4), dtype=np.uint8)):
+            with self.subTest(shape=getattr(bad, 'shape', None)):
+                self.assertEqual(deluxe.read_deluxe_count(bad), 0)
+
+    @unittest.skipUnless(np is not None, 'numpy required for image path')
+    def test_returns_int_and_never_raises_on_full_frame(self):
+        # Ein dunkles 800x600-BGR-Vollbild darf nie werfen und liefert einen
+        # int >= 0 (der genaue Wert haengt von der OCR ab -- die ECHTE Box-Zahl-
+        # Position/Schwelle ist live zu kalibrieren, siehe Modul-Docstring).
+        img = np.zeros((600, 800, 3), dtype=np.uint8)
+        out = deluxe.read_deluxe_count(img, (503, 271))
+        self.assertIsInstance(out, int)
+        self.assertGreaterEqual(out, 0)
+
+    @unittest.skipUnless(np is not None, 'numpy required for image path')
+    def test_default_center_used_when_omitted(self):
+        # Ohne center-Argument wird der Default (503,271) genutzt -> kein Crash.
+        img = np.zeros((600, 800, 3), dtype=np.uint8)
+        self.assertIsInstance(deluxe.read_deluxe_count(img), int)
 
 
 if __name__ == '__main__':  # pragma: no cover

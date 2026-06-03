@@ -86,6 +86,16 @@ class PuzzleBot(PuzzleDetectMixin):
     color_patch = 3
     solver_mode = 'standard'
 
+    # -- Force Deluxe (V3-Reservat-Strategie, opt-in) ---------------------
+    # force_deluxe: reserviert ein festes 2x3-Feld (deluxe.reservat_2x3) und
+    # laesst den trainierten Solver NUR die 18 anderen Zellen fuellen; der
+    # Deluxe-Stein (Magenta 2x3) fuellt das Reservat. Maximiert grosse 25+-Boxen
+    # (siehe deluxe.py + UI-Hilfetext). NUR wirksam, wenn solver_mode=='trained'
+    # UND mindestens 1 Deluxe-Box im Inventar liegt -- sonst laeuft der normale
+    # trained-Modus (kein Reservat). Default AUS -> Verhalten byte-stabil.
+    # Wird von run_loop.apply_puzzle_config aus der Config gesetzt.
+    force_deluxe = False
+
     # Referenz-BGR-Zentroide der 6 Steintypen fuer den 'multi'-Modus
     # (naechste-Referenzfarbe). Abgeleitet aus den Mittelpunkten der engen
     # BGR-Fenster in get_new_piece_color (single-Pfad) -- so klassifiziert
@@ -122,6 +132,7 @@ class PuzzleBot(PuzzleDetectMixin):
         self.wincap = WindowCapture(constants.GAME_NAME)
         self.state = 0
         self._discard_streak = 0      # Verwerfen-in-Folge (Finish-Modus-Trigger)
+        self._fd_avail_cache = None   # Force-Deluxe: Box-Verfuegbarkeits-Cache
         # Offset auf den Klassen-Default zuruecksetzen; die Integration setzt
         # danach den aus dem Detection-Modus aufgeloesten Offset (falls
         # abweichend). Garantiert einen wohldefinierten Startwert pro Lauf.
@@ -265,6 +276,92 @@ class PuzzleBot(PuzzleDetectMixin):
                      extra='keine der 6 BGR-Ranges getroffen -> new_piece=None')
         return None
 
+    # -- Force Deluxe (V3-Reservat) ---------------------------------------
+
+    def _read_deluxe_available(self):
+        """``True``, wenn >= 1 Deluxe-Box im Inventar liegt (per OCR der Box-Zahl).
+
+        Liest einen frischen Screenshot und gibt ihn an
+        ``deluxe.read_deluxe_count`` (32x32-Slot auf ``PUZZLE_DELUXE_BOX``,
+        font-unabhaengiges OCR). STRIKT defensiv -- jeder Fehler (kein wincap,
+        Screenshot-/OCR-Fehler) -> ``False`` (kein Force-Deluxe statt Crash)."""
+        try:
+            shot = self.wincap.get_screenshot()
+            return deluxe.read_deluxe_count(shot, self.PUZZLE_DELUXE_BOX) >= 1
+        except Exception:
+            return False
+
+    def _force_deluxe_active(self):
+        """``True``, wenn die V3-Force-Deluxe-Strategie GERADE greifen soll.
+
+        Bedingungen: ``force_deluxe`` an UND ``solver_mode == 'trained'`` UND
+        mindestens eine Deluxe-Box im Inventar. Die teure Inventar-OCR wird PRO
+        STEIN-ZYKLUS nur EINMAL ausgewertet und gecacht (``_fd_avail_cache``);
+        der Cache wird beim Anfordern eines neuen Steins (State 0) invalidiert
+        (siehe ``_reset_force_deluxe_cache``). So liest ein Brett-Durchlauf die
+        Box-Zahl genau einmal statt in jedem Teil-State. Wirft nie."""
+        try:
+            if not self.force_deluxe or self.solver_mode != 'trained':
+                return False
+            cached = getattr(self, '_fd_avail_cache', None)
+            if cached is None:
+                cached = self._read_deluxe_available()
+                self._fd_avail_cache = cached
+            return bool(cached)
+        except Exception:
+            return False
+
+    def _reset_force_deluxe_cache(self):
+        """Invalidiert den pro-Zyklus-Cache der Deluxe-Verfuegbarkeit.
+
+        Beim Start eines neuen Stein-Zyklus (State 0) gerufen, damit die naechste
+        ``_force_deluxe_active``-Abfrage die Box-Zahl frisch liest (eine geoeffnete
+        Box veraendert den Bestand). Wirft nie."""
+        self._fd_avail_cache = None
+
+    def _non_reservat_full(self):
+        """``True``, wenn die 18 Nicht-Reservat-Zellen ALLE belegt sind.
+
+        Prueft das interne ``tetris.board`` gegen ``deluxe.reservat_2x3()``: jede
+        Zelle, die NICHT zum Reservat gehoert, muss belegt sein. Genau dann ist
+        der Solver mit den 18 Zellen fertig und der Deluxe-Stein kann ins Reservat
+        gesetzt werden. Defensiv -> ``False`` (nicht voll -> Box bleibt zu)."""
+        try:
+            reservat = deluxe.reservat_2x3()
+            board = self.tetris.board
+            for i in range(4):
+                for j in range(6):
+                    if (i, j) not in reservat and not board[i][j]:
+                        return False
+            return True
+        except Exception:
+            return False
+
+    def _open_deluxe_box_and_place(self):
+        """Oeffnet die DELUXE-Box und setzt den Magenta-Stein ins Reservat.
+
+        Aufrufkontext (State 0): Force-Deluxe ist aktiv, die 18 Nicht-Reservat-
+        Zellen sind voll und das Reservat ist leer -> jetzt die Deluxe-Box
+        anklicken (``deluxe_box_screen_point``). Der dadurch erscheinende
+        Magenta-2x3-Stein wird ueber den bestehenden Stein-Pfad (Farb-Erkennung
+        Typ 7 -> ``_place_deluxe`` -> erstes freies 2x3 = das Reservat) gesetzt.
+
+        Hier wird NUR die Box geoeffnet und der Cache invalidiert (der Bestand
+        sinkt); die eigentliche Platzierung laeuft danach durch die normale
+        State-Machine. STRIKT defensiv -- ein Fehler hier darf den Loop nie
+        kippen. Rueckgabe ``True`` bei ausgefuehrtem Klick, sonst ``False``."""
+        try:
+            mx, my = self.deluxe_box_screen_point()
+            log.event(self.state, t('puzzle.force_deluxe_open_box'),
+                      pos=(mx, my))
+            pydirectinput.click(x=mx, y=my, button='left')
+            # Bestand hat sich geaendert -> Cache fuer den naechsten Zyklus frisch.
+            self._reset_force_deluxe_cache()
+            return True
+        except Exception as exc:
+            log.error(t('puzzle.force_deluxe_open_failed'), exc=exc)
+            return False
+
     def _place_deluxe(self):
         """Setzt den DELUXE-Stein (volles 2x3-Magenta) DETERMINISTISCH.
 
@@ -329,8 +426,15 @@ class PuzzleBot(PuzzleDetectMixin):
             # FINISH-Modus schalten: den am wenigsten schlechten Stein platzieren
             # -> Brett wird voll -> Truhe, statt Endlos-Verwerfen.
             finish = getattr(self, '_discard_streak', 0) >= FINISH_AFTER_DISCARDS
+            # Force Deluxe (V3): ist die Strategie aktiv (force_deluxe + trained
+            # + Deluxe-Box vorhanden), das feste 2x3-Reservat an den Solver
+            # reichen -> er fuellt nur die 18 anderen Zellen und legt NIE ins
+            # Reservat (das fuellt spaeter der Deluxe-Stein). Sonst kein Reservat
+            # (None) -> exakt der bisherige trained-Pfad.
+            reservat = (deluxe.reservat_2x3()
+                        if self._force_deluxe_active() else None)
             a = trained_solver.choose_placement(self.tetris.board, piece,
-                                                finish=finish)
+                                                finish=finish, reservat=reservat)
             if a is None:
                 self._discard_streak = getattr(self, '_discard_streak', 0) + 1
                 log.event(self.state,
@@ -469,11 +573,31 @@ class PuzzleBot(PuzzleDetectMixin):
 
         if self.state == 0:
             log.event(self.state, t('puzzle.request_new_piece'))
+            # Neuer Stein-Zyklus -> Deluxe-Verfuegbarkeits-Cache invalidieren
+            # (eine zuvor geoeffnete Box hat den Bestand veraendert). No-op,
+            # wenn Force-Deluxe aus ist.
+            self._reset_force_deluxe_cache()
             gx, gy = geometry.get_piece_point(self.board_size, self.key_points.get('getpiece'))
             mouse_x = int(gx + self.puzzle_offset[0] + self.wincap.offset_x)
             mouse_y = int(gy + self.puzzle_offset[1] + self.wincap.offset_y)
 
             if time() - self.timer_action > timep:
+
+                # Force Deluxe (V3): sind die 18 Nicht-Reservat-Zellen voll und
+                # das Reservat noch leer, NICHT einen normalen Stein anfordern,
+                # sondern die DELUXE-Box oeffnen -> der Magenta-Stein erscheint
+                # und wird ueber den normalen Pfad (Farbe Typ 7 -> _place_deluxe)
+                # ins Reservat gesetzt. Danach in State 1 (bestaetigen) weiter,
+                # exakt wie beim normalen Stein-Anfordern. Nur aktiv bei aktiver
+                # Strategie (force_deluxe + trained + Deluxe-Box vorhanden).
+                if (self._force_deluxe_active()
+                        and self._non_reservat_full()
+                        and deluxe.reservat_is_empty(self.tetris.board)):
+                    log.event(self.state, t('puzzle.force_deluxe_fill_reservat'))
+                    self._open_deluxe_box_and_place()
+                    self.state = 1
+                    self.timer_action = time()
+                    return None
 
                 if self.detect_end_game(crop_image):
                     if not self.try_to_put_chest():

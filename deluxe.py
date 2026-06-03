@@ -19,6 +19,13 @@ als puzzle.py. Es buendelt:
                                   im 4x6-Brett (oder ``None``).
   * :data:`DELUXE_FORM`        -- die 6 belegten Zellen relativ zum Anker.
 
+Force-Deluxe (V3-Reservat-Strategie, optionaler Aufsatz) ergaenzt:
+  * :data:`RESERVAT_ANCHOR` / :func:`reservat_2x3` -- das feste, unten-rechts
+    verankerte 2x3-Reservat (6 Zellen), in das der Deluxe-Stein gesetzt wird.
+  * :func:`reservat_is_empty`  -- sind alle 6 Reservat-Zellen frei?
+  * :func:`read_deluxe_count`  -- Stack-Zahl der DELUXE-Box per Inventar-OCR
+                                  (>= 1 -> Box vorhanden). STRIKT defensiv -> 0.
+
 Brettkonvention identisch zu puzzle.set_puzzle_state / trained_solver:
 ``board[i][j]``, i=Zeile 0..3, j=Spalte 0..5, truthy=belegt.
 """
@@ -88,3 +95,104 @@ def find_free_2x3(board):
     except (IndexError, TypeError):
         return None
     return None
+
+
+# ===========================================================================
+# FORCE-DELUXE (V3-Reservat-Strategie)
+# ===========================================================================
+# Die V3-Strategie reserviert EIN festes 2x3-Feld auf dem Brett und laesst den
+# Solver NUR die 18 anderen Zellen fuellen; den Deluxe-Stein (Magenta 2x3) setzt
+# der Bot dann ins reservierte Loch. Das maximiert die grossen 25+-Boxen (mehr
+# Steine landen, bevor die Box voll ist), kostet dafuer mehr kleine 1-10-Boxen
+# und mehr Box-Verbrauch. Strategie-Zahlen (Monte-Carlo):
+#   V1 (aktuell):           1-10=20.8%  11-24=71.0%  25+=8.3%   E[Boxen]=15.36
+#   V3 (Force Deluxe):      1-10=30.1%  11-24=55.4%  25+=14.5%  E[Boxen]=16.86
+#
+# Reservat unten-RECHTS: Anker (2,3) -> Zellen (2..3) x (3..5). So bleibt der
+# top-links-row-major-Scan von find_free_2x3 / dem Solver fuer die freien 18
+# Zellen ungestoert (er fuellt zuerst oben-links), und das Reservat ist das
+# LETZTE freie 2x3 -- genau dort setzt _place_deluxe (find_free_2x3) den Stein,
+# sobald die 18 anderen Zellen voll sind.
+RESERVAT_ANCHOR = (2, 3)
+
+
+def reservat_2x3():
+    """Die 6 Zellen ``(row, col)`` des V3-Reservats als ``frozenset``.
+
+    Verankert an :data:`RESERVAT_ANCHOR` (2,3), unten-rechts: die Zellen
+    {(2,3),(2,4),(2,5),(3,3),(3,4),(3,5)}. Format ``(Zeile, Spalte)`` passt zu
+    ``Tetris.insert_piece(x=Zeile, y=Spalte)`` und zum row-major-``board[i][j]``
+    sowie zur Bitmaske in ``trained_solver`` (``_idx(r, c)=r*COLS+c``)."""
+    ar, ac = RESERVAT_ANCHOR
+    return frozenset((ar + dr, ac + dc) for (dr, dc) in DELUXE_FORM)
+
+
+def reservat_is_empty(board):
+    """True, wenn ALLE 6 Reservat-Zellen auf ``board`` leer (falsy) sind.
+
+    Defensiv: kein/zu kleines/kaputtes Brett -> ``False`` (nicht leer -> der
+    Aufrufer oeffnet die Deluxe-Box dann nicht; nie Crash)."""
+    if not board:
+        return False
+    try:
+        for (r, c) in reservat_2x3():
+            if board[r][c]:
+                return False
+        return True
+    except (IndexError, TypeError):
+        return False
+
+
+def read_deluxe_count(screenshot_bgr, center=(503, 271)):
+    """Liest die Stack-ZAHL der DELUXE-Box aus einem Vollbild-Screenshot.
+
+    Schneidet einen 32x32-Slot zentriert auf ``center`` (Fenster-INHALT-
+    Koordinate, Default = ``PuzzleBot.PUZZLE_DELUXE_BOX``) aus dem BGR-Screenshot
+    aus, konvertiert ihn nach RGB und liest die aufgedruckte Stueckzahl per
+    ``inventory.digits.read_count`` (font-unabhaengiges OCR). Rueckgabe: die
+    erkannte Anzahl als ``int`` (``>= 1`` -> Deluxe-Box vorhanden), ``0`` wenn
+    keine Zahl/Box erkennbar ist.
+
+    STRIKT defensiv -- darf den Bot-Loop NIE kippen: jeder Fehler (kein numpy,
+    kaputtes/zu kleines Bild, OCR-Fehlschlag) -> ``0``. Eine UNSICHERE OCR-
+    Lesung (``confident=False``) wird als ``0`` gewertet (lieber kein Force-
+    Deluxe als ein faelschlich geoeffneter, leerer Box-Klick).
+
+    Verwendet ``inventory.grid.extract_slot`` fuer den BGR->RGB-Zuschnitt (mit
+    Rand-Klemmung) -- exakt das Format, das ``read_count`` erwartet."""
+    if screenshot_bgr is None:
+        return 0
+    try:
+        # Lazy-Import: inventory zieht numpy/PIL -- nur hier, damit deluxe.py
+        # ansonsten reine stdlib bleibt (headless importierbar/testbar).
+        from inventory.grid import extract_slot
+        from inventory.digits import read_count
+        from inventory.constants import SLOT_PX
+    except Exception:
+        return 0
+    try:
+        half = SLOT_PX // 2
+        cx, cy = int(center[0]), int(center[1])
+        # 32x32-Box (x, y, w, h) zentriert auf center; extract_slot klemmt an
+        # den Bildrand + repliziert fehlende Raender -> immer ein volles Slot.
+        box = (cx - half, cy - half, SLOT_PX, SLOT_PX)
+        slot_rgb = extract_slot(screenshot_bgr, box)
+        if slot_rgb is None:
+            return 0
+        result = read_count(slot_rgb)
+        if result is None:
+            return 0
+        value = getattr(result, 'value', None)
+        confident = getattr(result, 'confident', False)
+        # read_count liefert fuer einen Slot OHNE aufgedruckte Zahl value=1,
+        # n_digits=0, confident=True ("einzelnes, ungestapeltes Item"). Fuer die
+        # DELUXE-Box ist das genau der "1 Box, keine Stack-Zahl"-Fall -> als 1
+        # gewertet (Spec: value>=1 -> Box da). ACHTUNG (live zu kalibrieren): ein
+        # leerer/dunkler Slot an falscher Position liest sich ebenfalls als 1 ->
+        # die Box-Klick-Position/Schwelle muss am echten Client geprueft werden.
+        # Unsichere Lesung / kein int -> 0 (lieber kein Force-Deluxe).
+        if value is None or not confident:
+            return 0
+        return int(value)
+    except Exception:
+        return 0

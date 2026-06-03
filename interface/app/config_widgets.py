@@ -25,6 +25,10 @@ class ConfigWidgetsMixin:
         self.color_seg.set(puzzle['color_mode'].capitalize())
         self.solver_seg.set(self._solver_label_for(puzzle['solver_mode']))
         try:
+            self._force_deluxe_var.set(bool(puzzle.get('force_deluxe', False)))
+        except Exception:
+            pass
+        try:
             self._opacity_slider.set(puzzle['overlay_opacity'])
             self._refresh_opacity_value()
         except Exception:

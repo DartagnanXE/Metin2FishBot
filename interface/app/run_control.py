@@ -42,6 +42,15 @@ class RunControlMixin:
         value = self._solver_l2v.get(label, cfgmod.SOLVER_MODES[0])
         self._cfg = self.controller.update_config('puzzle', 'solver_mode', value)
 
+    def _on_force_deluxe_toggle(self):
+        """Schreibt den Force-Deluxe-Schalter (V3-Reservat) in die Config.
+
+        Reines bool. Nur wirksam bei 'KI optimiert' + vorhandener Deluxe-Box
+        (der PuzzleBot prueft das zur Laufzeit selbst); der Schalter persistiert
+        die Wahl unabhaengig davon."""
+        self._cfg = self.controller.update_config(
+            'puzzle', 'force_deluxe', bool(self._force_deluxe_var.get()))
+
     def sync_controls(self):
         """Spiegelt den Laufzustand ins UI (Hero, Rail-Punkte, Sperren).
 
@@ -87,6 +96,11 @@ class RunControlMixin:
         state = 'normal' if not running else 'disabled'
         self.stop_after_chk.configure(state=state)
         self.stop_after_entry.configure(state=state)
+        # Force-Deluxe-Schalter waehrend des Laufs sperren (wie die Segmente).
+        try:
+            self.force_deluxe_switch.configure(state=state)
+        except Exception:
+            pass
         # Reset-Knopf (Settings, Item K) nur im Leerlauf -- belt-and-suspenders
         # zum Idle-Guard in _on_reset_settings.
         try:

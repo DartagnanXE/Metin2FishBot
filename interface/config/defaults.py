@@ -109,6 +109,10 @@ DEFAULTS = {
         'color_mode': 'single',
         'color_patch': 3,
         'solver_mode': 'standard',
+        # Force Deluxe (V3-Reservat-Strategie): reserviert ein 2x3-Feld fuer den
+        # Deluxe-Stein -> mehr grosse 25+-Boxen. Nur wirksam bei 'trained' +
+        # vorhandener Deluxe-Box. Default AUS -> Verhalten unveraendert.
+        'force_deluxe': False,
         'overlay_opacity': 0.85,  # Deckkraft Mark-/Vorschau-Overlay (0.4..1.0)
         'step_delay': 0.1,        # Wartezeit zwischen Puzzle-Schritten (0.01..1.0 s)
     },

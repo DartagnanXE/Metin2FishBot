@@ -135,7 +135,28 @@ def _occ(board):
     return o
 
 
-def choose_placement(board, piece, deluxe_available=False, finish=False):
+def _reservat_mask(reservat):
+    """Belegungs-Bitmaske der Reservat-Zellen (``(row, col)``-Iterable) -> int.
+
+    Spiegelt das Reservat ins gleiche Bit-Layout wie ``_occ`` (``_idx(r, c) =
+    r*COLS + c``). Zellen ausserhalb des 4x6-Bretts werden ignoriert. ``None``/
+    leer -> ``0``. STRIKT defensiv: jeder Fehler -> ``0`` (kein Reservat ->
+    Solver verhaelt sich exakt wie ohne den Parameter)."""
+    if not reservat:
+        return 0
+    m = 0
+    try:
+        for cell in reservat:
+            r, c = int(cell[0]), int(cell[1])
+            if 0 <= r < ROWS and 0 <= c < COLS:
+                m |= 1 << _idx(r, c)
+    except (TypeError, ValueError, IndexError):
+        return 0
+    return m
+
+
+def choose_placement(board, piece, deluxe_available=False, finish=False,
+                     reservat=None):
     """Box-spar-optimaler Anker ``(x, y)`` fuer ``Tetris.insert_piece`` -- oder
     ``None``, wenn Verwerfen die optimale Aktion ist.
 
@@ -154,6 +175,15 @@ def choose_placement(board, piece, deluxe_available=False, finish=False):
 
     ``deluxe_available`` bleibt vorerst ungenutzt (eine box-zaehler-bewusste
     Strategie ueber die Inventar-OCR ist der naechste, additive Schritt).
+
+    ``reservat`` (optional, ``frozenset`` von ``(row, col)``, z.B.
+    ``deluxe.reservat_2x3()``) aktiviert die V3-Force-Deluxe-Strategie: die
+    Reservat-Zellen werden als BELEGT behandelt (ihre Bitmaske wird ins ``occ``
+    ge-OR-t). Der Solver legt damit NIE ueber das Reservat und fuellt die 18
+    anderen Zellen mit DERSELBEN Wertfunktion ``V`` optimal (kein neues MDP --
+    V bewertet beliebige occ-Bitmasken, also auch die mit gesetztem Reservat).
+    Der Deluxe-Stein fuellt das Reservat spaeter separat. ``None``/leer ->
+    exakt das bisherige Verhalten (byte-stabil).
     Defensiv: kein Board / ungueltiger Stein -> ``None`` (nie Crash).
     """
     if board is None or piece is None:
@@ -163,7 +193,9 @@ def choose_placement(board, piece, deluxe_available=False, finish=False):
         return None
     try:
         V = load_V()
-        occ = _occ(board)
+        # Reservat-Zellen als belegt mitfuehren -> der Solver platziert nie
+        # darueber und V bewertet das verbleibende 18-Zellen-Teilproblem.
+        occ = _occ(board) | _reservat_mask(reservat)
         base = float(V[occ])
         best_v = None
         best_xy = None

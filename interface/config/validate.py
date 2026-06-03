@@ -253,6 +253,10 @@ def validate(cfg):
         puzzle['solver_mode'] = _enum(
             puzzle.get('solver_mode'), SOLVER_MODES,
             DEFAULTS['puzzle']['solver_mode'])
+        # Force Deluxe: reines bool (ungueltig/fehlend -> False). Strikt
+        # additiv; default aus -> byte-stabiler Pfad.
+        puzzle['force_deluxe'] = bool(
+            puzzle.get('force_deluxe', DEFAULTS['puzzle']['force_deluxe']))
         patch = _coerce_int(puzzle.get('color_patch'),
                             DEFAULTS['puzzle']['color_patch'])
         puzzle['color_patch'] = (

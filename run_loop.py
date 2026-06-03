@@ -290,6 +290,9 @@ class RunLoop:
         self.puzzlebot.color_patch = puzzle['color_patch']
         self.puzzlebot.solver_mode = puzzle['solver_mode']
         self.puzzlebot.step_delay = puzzle['step_delay']
+        # Force Deluxe (V3-Reservat): nur wirksam bei solver_mode=='trained' +
+        # vorhandener Deluxe-Box (der PuzzleBot prueft das selbst). Default aus.
+        self.puzzlebot.force_deluxe = puzzle.get('force_deluxe', False)
 
     def inject_offset(self):
         """Loest den Board-Offset aus dem Detection-Modus auf und injiziert ihn.

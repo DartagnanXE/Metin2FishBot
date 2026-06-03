@@ -80,6 +80,33 @@ class TestEnumCoercion(unittest.TestCase):
         self.assertEqual(cfg['puzzle']['color_patch'], 5)
 
 
+class TestForceDeluxe(unittest.TestCase):
+    """Force-Deluxe (V3-Reservat): reines bool, Default aus, robust gecoerct."""
+
+    def test_default_is_false(self):
+        cfg = config.validate(config.DEFAULTS)
+        self.assertEqual(cfg['puzzle']['force_deluxe'], False)
+
+    def test_missing_falls_back_to_default(self):
+        cfg = config.validate({'puzzle': {'color_mode': 'multi'}})
+        self.assertEqual(cfg['puzzle']['force_deluxe'], False)
+
+    def test_truthy_values_coerced_to_true(self):
+        for raw in (True, 1, 'yes', 'true', [0]):
+            cfg = config.validate({'puzzle': {'force_deluxe': raw}})
+            self.assertIs(cfg['puzzle']['force_deluxe'], True)
+
+    def test_falsy_values_coerced_to_false(self):
+        for raw in (False, 0, '', None, []):
+            cfg = config.validate({'puzzle': {'force_deluxe': raw}})
+            self.assertIs(cfg['puzzle']['force_deluxe'], False)
+
+    def test_result_is_real_bool_not_truthy_value(self):
+        # Persistenz/JSON soll ein echtes bool sehen, kein truthy Objekt.
+        cfg = config.validate({'puzzle': {'force_deluxe': 'on'}})
+        self.assertIsInstance(cfg['puzzle']['force_deluxe'], bool)
+
+
 class TestPuzzleStepDelay(unittest.TestCase):
     """Puzzle-Schritt-Delay: Default 0.1 s, geklemmt auf 0.01..1.0 s."""
 

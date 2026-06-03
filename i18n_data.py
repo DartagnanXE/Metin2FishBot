@@ -82,6 +82,9 @@ TRANSLATIONS = {
     'puzzle.confirm_selection_get_piece': {'en': 'Confirm selection (get piece)', 'de': 'Auswahl bestätigen (Stein holen)'},
     'puzzle.deluxe_no_2x3_slot': {'en': 'Deluxe piece (type {piece_type}): no free 2x3 slot on the board -> discard', 'de': 'Deluxe-Stein (Typ {piece_type}): kein freies 2x3-Feld auf dem Brett -> verwerfen'},
     'puzzle.deluxe_placed': {'en': 'Deluxe piece (type {piece_type}) placed as full 2x3 at {pos}', 'de': 'Deluxe-Stein (Typ {piece_type}) als volles 2x3 bei {pos} gesetzt'},
+    'puzzle.force_deluxe_fill_reservat': {'en': 'Force Deluxe: 18 cells full, reservat empty -> opening the Deluxe box to fill the 2x3 reservat', 'de': 'Force Deluxe: 18 Zellen voll, Reservat leer -> öffne die Deluxe-Box, um das 2x3-Reservat zu füllen'},
+    'puzzle.force_deluxe_open_box': {'en': 'Force Deluxe: clicking the Deluxe box at {pos}', 'de': 'Force Deluxe: klicke die Deluxe-Box bei {pos}'},
+    'puzzle.force_deluxe_open_failed': {'en': 'Force Deluxe: opening the Deluxe box failed ({exc}) -> skipping this cycle', 'de': 'Force Deluxe: Öffnen der Deluxe-Box fehlgeschlagen ({exc}) -> Zyklus übersprungen'},
     'puzzle.discard_piece_no_placement': {'en': 'Discard piece (no placement)', 'de': 'Stein wegwerfen (keine Platzierung)'},
     'puzzle.invalid_piece_discarded': {'en': 'Invalid piece (new_piece={new_piece}) -> discarded, no solver run', 'de': 'Ungültiger Stein (new_piece={new_piece}) -> wird verworfen, kein Solver-Lauf'},
     'puzzle.move_mouse_to_color_sample': {'en': 'Move mouse to piece color sample', 'de': 'Maus auf Stein-Farb-Sample bewegen'},
@@ -132,6 +135,8 @@ TRANSLATIONS = {
     'ui.settings_saved': {'en': 'Settings saved (config.json)', 'de': 'Einstellungen gespeichert (config.json)'},
     'ui.solver_label_default': {'en': 'Default', 'de': 'Standard'},
     'ui.solver_label_trained': {'en': 'AI optimized', 'de': 'KI optimiert'},
+    'ui.force_deluxe': {'en': 'Force Deluxe', 'de': 'Force Deluxe'},
+    'ui.force_deluxe_help': {'en': 'Reserve one 2x3 field for the Deluxe piece (Magenta) and let the AI fill only the other 18 cells. This pushes more pieces onto the board before a box fills -> more big "25+" boxes, but also more small "1-10" boxes and a higher box consumption.\nHonest trade-off (per box):\n  • Normal (AI optimized): 1-10 = 20.8%, 11-24 = 71.0%, 25+ = 8.3%, avg = 15.36 boxes\n  • Force Deluxe: 1-10 = 30.1%, 11-24 = 55.4%, 25+ = 14.5%, avg = 16.86 boxes\nOnly takes effect with "AI optimized" AND at least 1 Deluxe box in the inventory -- otherwise the normal AI mode runs.', 'de': 'Reserviert ein 2x3-Feld für den Deluxe-Stein (Magenta) und lässt die KI nur die anderen 18 Zellen füllen. Dadurch landen mehr Steine auf dem Brett, bevor eine Box voll ist -> mehr große "25+"-Boxen, aber auch mehr kleine "1-10"-Boxen und ein höherer Box-Verbrauch.\nEhrlicher Trade-off (pro Box):\n  • Normal (KI optimiert): 1-10 = 20,8%, 11-24 = 71,0%, 25+ = 8,3%, Ø = 15,36 Boxen\n  • Force Deluxe: 1-10 = 30,1%, 11-24 = 55,4%, 25+ = 14,5%, Ø = 16,86 Boxen\nNur wirksam mit "KI optimiert" UND mindestens 1 Deluxe-Box im Inventar -- sonst läuft der normale KI-Modus.'},
     # --- Detection-mode labels (Default / Auto / Manual) -- display only;
     #     the internal config enum stays 'default'/'auto'/'mark'.
     'ui.detection_label_default': {'en': 'Default', 'de': 'Standard'},

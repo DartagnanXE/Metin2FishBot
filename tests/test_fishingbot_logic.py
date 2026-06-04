@@ -269,8 +269,8 @@ class TestWhitelistDecision(unittest.TestCase):
     """``_apply_whitelist`` aborts unwanted catches / nibbles and keeps the rest.
 
     ``fishing_chat.read_hook`` is patched so we control exactly WHAT hangs on the
-    hook; ``_abort_minigame`` is checked end-to-end (window-close click + state
-    reset). The decision logic itself lives in ``fishing_whitelist`` (pure).
+    hook; ``_abort_minigame`` is checked end-to-end (ESC keypress + state reset,
+    NO click). The decision logic itself lives in ``fishing_whitelist`` (pure).
     """
 
     def _bot(self, enabled=True, states=None):
@@ -283,7 +283,6 @@ class TestWhitelistDecision(unittest.TestCase):
         bot._best_minigame_conf = 0.0
         bot.state = 3
         bot.wincap = _StubCapture()
-        bot.FISH_WINDOW_CLOSE = fishingbot.FishingBot.FISH_WINDOW_CLOSE
         return bot
 
     def _hook(self, **kw):
@@ -293,12 +292,14 @@ class TestWhitelistDecision(unittest.TestCase):
         return fc.HookResult(**defaults)
 
     def _run(self, bot, hook):
-        clicks = []
+        clicks, keys = [], []
         fake = mock.Mock()
         fake.click.side_effect = lambda **k: clicks.append(k)
+        fake.keyDown.side_effect = lambda k: keys.append(k)
         with mock.patch.object(fishingbot, 'pydirectinput', fake), \
                 mock.patch('fishing_chat.read_hook', return_value=hook):
             aborted = bot._apply_whitelist(object())   # screenshot ignored (patched)
+        self._last_keys = keys      # ESC-Pruefung ohne die (aborted, clicks)-Signatur
         return aborted, clicks
 
     def test_unwanted_fish_aborts_and_resets_state(self):
@@ -308,7 +309,8 @@ class TestWhitelistDecision(unittest.TestCase):
         aborted, clicks = self._run(bot, self._hook(kind=fc.FISH, name='Lachs'))
         self.assertTrue(aborted)
         self.assertEqual(bot.state, 0)              # back to recast
-        self.assertGreaterEqual(len(clicks), 1)     # window-close click(s) fired
+        self.assertEqual(clicks, [])                # NO click (legacy coord removed)
+        self.assertIn('esc', self._last_keys)       # ESC presses the abort instead
         # The abort ENDS the cycle (_on_cycle_end), which clears the per-cycle
         # decision flag so the NEXT cast re-evaluates from scratch.
         self.assertFalse(bot._whitelist_decided)

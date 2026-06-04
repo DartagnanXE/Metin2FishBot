@@ -57,8 +57,6 @@ class FishingBot(FishingDetectMixin):
 
     FILTER_CONFIG = [49, 0, 58, 134, 189, 189, 0, 0, 0, 0]
 
-    FISH_WINDOW_CLOSE = (430, 115)
-
     # Golden-Tuna-Dialog: 3 senkrecht gestapelte Knoepfe. 1 = Freilassen,
     # 2 = Aufschneiden, 3 = Als Koeder benutzen. Knoepfe sind gleichmaessig (DY)
     # gestapelt.
@@ -270,23 +268,35 @@ class FishingBot(FishingDetectMixin):
             return None
 
     def _abort_minigame(self):
-        """Bricht das laufende Minispiel SOFORT ab und stellt auf "neu auswerfen"
-        (State 0) -- der robusteste Weg per Default: das Fenster schliessen
-        (FISH_WINDOW_CLOSE). Gibt den genutzten Weg als String zurueck (fuers
-        Logging). Wirft nie."""
-        how = 'window_close'
+        """Bricht den aktuellen Angel-Versuch SOFORT ab und startet den Zyklus neu.
+
+        KEIN Klick mehr (die alte FISH_WINDOW_CLOSE-Koordinate war eine falsche
+        Altlast, ~55px neben dem Minispielfenster). Stattdessen: ESC druecken
+        (raeumt ein evtl. offenes Minispiel weg), dann -- falls Mount aktiv -- die
+        Mount-Cancel-Sequenz (auf-/absteigen, setzt den Figuren-Zustand sauber
+        zurueck), und auf State 0 stellen, sodass der naechste Tick Koeder setzt +
+        neu auswirft. Gibt den genutzten Weg fuers Logging zurueck. Wirft nie."""
+        how = 'esc'
         try:
-            mouse_x = int(self.wincap.offset_x + self.FISH_WINDOW_CLOSE[0])
-            mouse_y = int(self.wincap.offset_y + self.FISH_WINDOW_CLOSE[1])
-            pydirectinput.click(x=mouse_x, y=mouse_y, button='left')
-            pydirectinput.click(x=mouse_x, y=mouse_y, button='left')
+            pydirectinput.keyDown('esc')
+            pydirectinput.keyUp('esc')
         except Exception:
-            # Fallback: wenn der Klick nicht geht, reicht der State-Reset unten --
-            # der naechste Zyklus wirft ohnehin neu aus.
+            # Geht ESC nicht, reicht der State-Reset unten -> naechster Zyklus
+            # wirft ohnehin neu aus.
             how = 'recast_only'
-        # In jedem Fall auf "neu auswerfen" zuruecksetzen.
+        # Falls Mount aktiviert: wie nach einem Fang auf-/absteigen -> sauberer
+        # Neustart (Pferd -> Koeder -> Auswerfen).
+        if self.mount_enabled:
+            try:
+                self._do_mount_cancel(mount.mount_cancel_steps(self.mount_key))
+            except Exception:
+                pass
+        # Sofort von vorne, OHNE Vorlauf: auf State 0 + den Timer so vordatieren,
+        # dass der naechste Tick INSTANT neu koedert (kein bait_time-Warten). Bait
+        # -> Cast -> Minispiel laufen dann mit den eingestellten (schnellen) Zeiten.
         self.state = 0
-        self.timer_action = time()
+        self.timer_action = time() - max(
+            self.bait_time, self.throw_time, self.game_time) - 1.0
         self._on_cycle_end()
         return how
 
@@ -360,20 +370,6 @@ class FishingBot(FishingDetectMixin):
         except Exception:
             return None
 
-    def _open_inventory(self):
-        """Druckt die Inventar-Hotkey (oeffnet/schliesst das Inventar). Wirft nie.
-
-        Die 0.25s-Wartezeit laeuft als INTERRUPTIBLE Nap ueber das Stop-Signal --
-        kommt waehrenddessen F6, kehrt sie sofort zurueck (kein blockierendes
-        sleep). Ohne injiziertes Signal (NULL_SIGNAL) wartet sie wie bisher."""
-        try:
-            key = str(self.inventory_hotkey or 'i')
-            pydirectinput.keyDown(key)
-            pydirectinput.keyUp(key)
-            self._refill_sleep(0.25)
-        except Exception:
-            pass
-
     def _refill_sleep(self, seconds):
         """Interruptible Nap fuers Nachlegen: schlaeft ``seconds`` ueber das
         Stop-Signal (``StopSignal.wait``) und kehrt SOFORT zurueck, sobald ein
@@ -409,9 +405,10 @@ class FishingBot(FishingDetectMixin):
         Streng defensiv + opt-in (Default AUS -> sofort raus -> byte-stabil).
         Prueft hoechstens alle ``_BAIT_REFILL_INTERVAL`` s (Aufruf nur kurz vorm
         Baiten in State 0) auf dem ohnehin geholten ``screenshot`` -- kein Extra-
-        Capture, keine Last. Bei leerem Slot:
-          * Inventar oeffnen, ``refill.refill_from_inventory`` einen Koeder ziehen,
-            Inventar wieder schliessen;
+        Capture, keine Last. Das Inventar muss beim Angeln OFFEN sein (kein
+        I-Druck -- das Inventar wird nicht geoeffnet/geschlossen). Bei leerem Slot:
+          * aus dem offenen Inventar ``refill.refill_from_inventory`` einen Koeder
+            in den Quickslot ziehen;
           * Ergebnis ``'dragged'`` -> Log "nachgelegt";
           * ``'empty'`` (kein Koeder mehr im Inventar) -> Bot stoppen
             (``botting=False``) + klares Log und optionalen Popup-Hook
@@ -450,14 +447,12 @@ class FishingBot(FishingDetectMixin):
             _flog(self.state, t('fishing.bait_refill_started'),
                   budget=int(self._BAIT_REFILL_BUDGET))
 
-            self._open_inventory()
-            try:
-                result = _refill.refill_from_inventory(
-                    _refill.BAIT_NAMES, target, inp=pydirectinput,
-                    wincap=self.wincap, db=self.bait_refill_db, calib=calib,
-                    sleep=self._refill_sleep, should_stop=self._refill_should_stop)
-            finally:
-                self._open_inventory()   # Inventar wieder schliessen (Toggle)
+            # Das Inventar ist beim Angeln IMMER offen -> KEIN I-Druck (kein
+            # Oeffnen/Schliessen), direkt aus dem offenen Inventar nachlegen.
+            result = _refill.refill_from_inventory(
+                _refill.BAIT_NAMES, target, inp=pydirectinput,
+                wincap=self.wincap, db=self.bait_refill_db, calib=calib,
+                sleep=self._refill_sleep, should_stop=self._refill_should_stop)
 
             if result == 'dragged':
                 _flog(self.state, t('fishing.bait_refill_done'),

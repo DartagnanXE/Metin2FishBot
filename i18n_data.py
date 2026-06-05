@@ -389,6 +389,7 @@ TRANSLATIONS = {
     'ui.inv_manage_applied': {'en': 'Manage plan: keep {keep}, remove {remove}, campfire {campfire}', 'de': 'Management-Plan: {keep} behalten, {remove} entfernen, {campfire} Lagerfeuer'},
     'ui.inv_manage_remove': {'en': 'Remove', 'de': 'Entfernen'},
     'ui.inv_manage_campfire': {'en': 'Campfire', 'de': 'Lagerfeuer'},
+    'ui.inv_manage_no_marks': {'en': 'Nothing marked - first click items in the grid (keep / remove / campfire), then press Manage inventory', 'de': 'Nichts markiert - klick zuerst Items im Raster an (behalten / entfernen / Lagerfeuer), dann Inventar managen drücken'},
     'ui.inv_manage_no_icons': {'en': 'No item icons bundled', 'de': 'Keine Item-Icons gebündelt'},
     'ui.inventory_scan_failed': {'en': 'Scan failed - see Console', 'de': 'Scan fehlgeschlagen - siehe Console'},
     'ui.inventory_never_scanned': {'en': 'Not scanned yet', 'de': 'Noch nicht gescannt'},

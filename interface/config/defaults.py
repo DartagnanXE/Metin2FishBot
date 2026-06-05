@@ -147,14 +147,17 @@ DEFAULTS = {
     'inventory': {                # Inventar-Scan: Hotkey + (gestubbter) Auto-Scan
         'hotkey': 'i',            # In-Game-Taste, die das Inventar oeffnet
         'auto_scan_after_fishing': False,  # vorerst nur Setting + Roadmap
-        # OPT-IN: vektorisierte Erkennung. Statt die 45 Slots/Seite einzeln in
-        # einer Python-Schleife zu matchen, wird die maskierte Differenz fuer ALLE
-        # Slots einer Seite in EINER gebatchten numpy-Operation berechnet (s.
-        # inventory.itemdb.match_page_distances) und die 4 Seiten ueberlappen im
-        # Thread-Pool. Ergebnis ist BIT-IDENTISCH zum Schleifen-Pfad (gleiche
-        # InventoryMap), nur schneller. Default False = byte-stabil; auf True
-        # setzen aktiviert den schnellen Pfad in run_inventory_scan.
-        'fast_recognition': False,
+        # Vektorisierte Erkennung -- jetzt der EINZIGE Pfad (kein UI-Schalter mehr).
+        # Statt die 45 Slots/Seite einzeln in einer Python-Schleife zu matchen,
+        # wird die maskierte Differenz fuer ALLE Slots einer Seite in EINER
+        # gebatchten numpy-Operation berechnet (s. inventory.itemdb.
+        # match_page_distances) und die 4 Seiten ueberlappen im Thread-Pool.
+        # Ergebnis ist BIT-IDENTISCH zum Schleifen-Pfad (gleiche InventoryMap),
+        # nur schneller -> als Default sicher. Die Validierung migriert ein
+        # frueheres False stillschweigend auf True (es war nie eine bewusste
+        # User-Wahl); der Schluessel bleibt nur als interner Debug-Default
+        # erhalten, falls man den Schleifen-Pfad je wieder einschalten will.
+        'fast_recognition': True,
     },
     # Selbstgewaehlter Ranking-Name (einzige "PII"). Leer = anonym (man erscheint
     # unter dem generierten Anon-Namen). Setzen = Opt-in, diesen Namen zu zeigen.

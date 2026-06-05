@@ -39,11 +39,13 @@ class SettingsEffectsMixin:
     def _on_fast_recognition_toggle(self):
         """Persistiert den Opt-in 'schnelle (vektorisierte) Erkennung'-Schalter.
 
-        Reines bool (Default AUS = byte-stabil). True schaltet in
-        ``run_inventory_scan`` den vektorisierten, BIT-IDENTISCHEN Erkennungspfad
-        frei (gleiche InventoryMap, nur schneller -- die maskierte Differenz wird
-        je Seite in EINER gebatchten numpy-Operation statt 45 Einzelschritten
-        berechnet)."""
+        Der zugehoerige Schalter wurde aus dem UI entfernt: der vektorisierte,
+        BIT-IDENTISCHE Erkennungspfad ist jetzt fest aktiv (siehe ``validate``,
+        das ``inventory.fast_recognition`` unbedingt auf True setzt). Dieser
+        Handler ist damit ohne gebundenes Widget unerreichbar; der Guard haelt
+        ihn als no-op, falls er je doch aufgerufen wird (kein Wurf im UI)."""
+        if not hasattr(self, '_fast_recognition_var'):
+            return
         self._cfg = self.controller.update_config(
             'inventory', 'fast_recognition',
             bool(self._fast_recognition_var.get()))

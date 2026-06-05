@@ -473,6 +473,112 @@ class TestGuiLaunchSmoke(unittest.TestCase):
             self.app.controller.current_config()['fishing']['bait_refill_enabled'],
             False)
 
+    # -- Inventory scan: progress-fill button + no-marks message ----------
+
+    def test_inventory_scan_button_fills_with_progress(self):
+        # The "Scan inventory" button turns into a progress bar during a scan:
+        # a CTkProgressBar (the fill, left->right) + a % label, both children of
+        # the button. The % runs SYNC with the fill (0..100). Driven directly via
+        # the GUI-thread fill helpers that the worker's progress_fn marshals into.
+        from i18n import t
+        self.app._show_view('inventory')
+        self.app.update_idletasks()
+        btn = self.app._inv_scan_btn
+        self.assertTrue(btn.winfo_exists())
+
+        # Begin: overlay exists, starts at 0%, button text cleared (overlay owns
+        # the surface now).
+        self.app._inv_scan_fill_begin()
+        self.app.update_idletasks()
+        fill = getattr(self.app, '_inv_scan_fill', None)
+        self.assertIsNotNone(fill, 'progress overlay not created on begin')
+        self.assertIn('bar', fill)
+        self.assertIn('label', fill)
+        self.assertEqual(fill['pct'], 0)
+        # Bar + label are parented IN the button (track its size via place()).
+        self.assertIs(fill['bar'].master, btn)
+        self.assertIs(fill['label'].master, btn)
+        self.assertEqual(str(btn.cget('text')), '')
+
+        # Progress: fill value and % label move together.
+        self.app._inv_scan_fill_set(50)
+        self.app.update_idletasks()
+        self.assertEqual(self.app._inv_scan_fill['pct'], 50)
+        self.assertAlmostEqual(fill['bar'].get(), 0.5, places=3)
+        self.assertEqual(str(fill['label'].cget('text')),
+                         t('inventory.scan_progress_pct', pct=50))
+
+        # Monotonic: a late, smaller value must NOT make the bar jump back.
+        self.app._inv_scan_fill_set(20)
+        self.assertEqual(self.app._inv_scan_fill['pct'], 50)
+        # Clamp above 100 -> full bar.
+        self.app._inv_scan_fill_set(150)
+        self.assertEqual(self.app._inv_scan_fill['pct'], 100)
+        self.assertAlmostEqual(fill['bar'].get(), 1.0, places=3)
+
+        # End: overlay torn down, button text reset to its idle label (full/empty
+        # -> a normal button again).
+        self.app._inv_scan_fill_end()
+        self.app.update_idletasks()
+        self.assertIsNone(getattr(self.app, '_inv_scan_fill', None))
+        self.assertEqual(str(btn.cget('text')), t('ui.inventory_scan_btn'))
+
+    def test_inventory_scan_fill_begin_is_idempotent(self):
+        # Re-entry / a UI rebuild mid-scan must not stack overlays: a second
+        # begin just resets the existing fill to 0%.
+        self.app._show_view('inventory')
+        self.app.update_idletasks()
+        self.app._inv_scan_fill_begin()
+        self.app._inv_scan_fill_set(40)
+        self.app._inv_scan_fill_begin()          # second begin
+        self.app.update_idletasks()
+        self.assertEqual(self.app._inv_scan_fill['pct'], 0)
+        self.app._inv_scan_fill_end()
+
+    def test_inventory_scan_fill_helpers_never_raise_without_overlay(self):
+        # set/end are defensive: with no overlay present they are silent no-ops
+        # (e.g. a stray late progress callback after the scan already ended).
+        self.app._inv_scan_fill = None
+        self.app._inv_scan_fill_set(75)          # must not raise
+        self.app._inv_scan_fill_end()            # must not raise
+        self.assertIsNone(getattr(self.app, '_inv_scan_fill', None))
+
+    def test_inventory_manage_nothing_marked_shows_clear_message(self):
+        # With everything left on KEEP (nothing marked remove/campfire), Manage
+        # must NOT log the misleading bare counts ("45 keep, 0 remove, 0
+        # campfire") -- it logs/shows a clear call-to-action and starts NO worker.
+        from i18n import t
+        from interface import inventory_manage as im
+        self.app._show_view('inventory')
+        self.app.update_idletasks()
+
+        started = {'grill': 0, 'discard': 0}
+        orig_grill = self.app._start_campfire_grill
+        orig_discard = self.app._start_item_discard
+        self.app._start_campfire_grill = lambda *a, **k: started.__setitem__(
+            'grill', started['grill'] + 1)
+        self.app._start_item_discard = lambda *a, **k: started.__setitem__(
+            'discard', started['discard'] + 1)
+        try:
+            # Force a known "all keep" state regardless of which icons bundled.
+            self.app._inv_manage_states = {'Lachs': im.KEEP, 'Zander': im.KEEP}
+            self.app._on_inv_manage_apply()
+            self.app.update_idletasks()
+            self.assertEqual(str(self.app._inv_status.cget('text')),
+                             t('ui.inv_manage_no_marks'))
+            self.assertEqual(started['grill'], 0)
+            self.assertEqual(started['discard'], 0)
+
+            # Sanity: with one item marked REMOVE, the normal path runs (discard
+            # worker invoked) -- the no-marks guard is specific to "nothing marked".
+            self.app._inv_manage_states = {'Lachs': im.REMOVE, 'Zander': im.KEEP}
+            self.app._on_inv_manage_apply()
+            self.app.update_idletasks()
+            self.assertEqual(started['discard'], 1)
+        finally:
+            self.app._start_campfire_grill = orig_grill
+            self.app._start_item_discard = orig_discard
+
 
 if __name__ == '__main__':
     unittest.main()

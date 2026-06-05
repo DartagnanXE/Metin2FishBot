@@ -303,10 +303,14 @@ def validate(cfg):
             inventory.get('hotkey'), DEFAULTS['inventory']['hotkey'])
         inventory['auto_scan_after_fishing'] = bool(
             inventory.get('auto_scan_after_fishing', False))
-        # OPT-IN vektorisierte Erkennung -- reines bool (Default False =
-        # byte-stabil; True schaltet den schnellen, bit-identischen Pfad frei).
-        inventory['fast_recognition'] = bool(
-            inventory.get('fast_recognition', False))
+        # Vektorisierte Erkennung ist jetzt der einzige (bit-identische) Pfad und
+        # der UI-Schalter ist entfallen. MIGRATION: ein frueher gespeichertes
+        # False wird stillschweigend auf True gehoben -- es war nie eine bewusste
+        # User-Wahl (nur ein Default-Schalter), und der vektorisierte Pfad liefert
+        # dieselbe InventoryMap, nur schneller. Damit erscheint nach dem Update
+        # niemand mehr versehentlich auf dem langsamen Schleifen-Pfad. Der
+        # Schluessel bleibt als interner Debug-Default True erhalten.
+        inventory['fast_recognition'] = True
 
         # -- Username (einzige PII): gestrippt + auf USERNAME_MAXLEN gekappt.
         try:

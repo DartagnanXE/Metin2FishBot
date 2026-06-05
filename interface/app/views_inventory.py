@@ -51,8 +51,13 @@ class InventoryViewMixin:
         # hier ist die kosmetische Korrektur, damit der Knopf sofort stimmt.
         try:
             if getattr(self, '_inv_scanning', False):
-                self._inv_scan_btn.configure(
-                    state='disabled', text=t('ui.inventory_scanning'))
+                # Laeuft ein Scan, ist der frisch gebaute Knopf ein NEUES Widget
+                # ohne Overlay -> die alte Overlay-Referenz verwerfen und auf dem
+                # neuen Knopf den Fortschrittsbalken neu aufsetzen (der naechste
+                # progress-Callback fuellt ihn weiter).
+                self._inv_scan_btn.configure(state='disabled')
+                self._inv_scan_fill = None
+                self._inv_scan_fill_begin()
             elif self.controller.running:
                 self._inv_scan_btn.configure(state='disabled')
         except Exception:
@@ -211,6 +216,21 @@ class InventoryViewMixin:
         remove = sorted(n for n, s in st.items() if s == im.REMOVE)
         campfire = sorted(n for n, s in st.items() if s == im.CAMPFIRE)
         keep = len(st) - len(remove) - len(campfire)
+        # NICHTS markiert (alles auf 'behalten'): die nackten Zahlen
+        # ("45 behalten, 0 entfernen, 0 Lagerfeuer") sind missverstaendlich --
+        # es sieht aus, als waere etwas passiert. Stattdessen eine klare
+        # Handlungsanweisung loggen + in der Status-Zeile zeigen und SOFORT raus
+        # (kein Grill-/Discard-Worker noetig). Wirft nie.
+        if not remove and not campfire:
+            try:
+                log.event('-', t('ui.inv_manage_no_marks'))
+            except Exception:
+                pass
+            try:
+                self._set_inv_status(t('ui.inv_manage_no_marks'), AMBER)
+            except Exception:
+                pass
+            return
         try:
             log.event('0', t('ui.inv_manage_applied', keep=keep,
                              remove=len(remove), campfire=len(campfire)))
@@ -458,8 +478,12 @@ class InventoryViewMixin:
             return
         self._inv_scanning = True
         try:
-            self._inv_scan_btn.configure(state='disabled',
-                                         text=t('ui.inventory_scanning'))
+            # Knopf sperren UND in einen Fortschrittsbalken verwandeln (Fuellung
+            # links->rechts + synchrone %-Zahl ab 0). Der Text wird vom Overlay
+            # gestellt; scheitert das Overlay, faellt _inv_scan_fill_begin selbst
+            # auf den 'Scanne ...'-Text zurueck.
+            self._inv_scan_btn.configure(state='disabled')
+            self._inv_scan_fill_begin()
         except Exception:
             pass
         # CS4: bind the SELECTED window for the scan's duration so capture+input
@@ -515,6 +539,9 @@ class InventoryViewMixin:
             return
         try:
             pct = int(done * 100 / total) if total else 100
+            # Knopf-Fuellung + %-Zahl SYNCHRON hochziehen (links->rechts, 0..100)
+            # und parallel die Status-Zeile mitlaufen lassen.
+            self._inv_scan_fill_set(pct)
             self._set_inv_status(
                 t('inventory.scan_progress_pct', pct=pct), TEAL)
         except Exception:
@@ -531,8 +558,10 @@ class InventoryViewMixin:
         except Exception:
             pass
         try:
-            self._inv_scan_btn.configure(state='normal',
-                                         text=t('ui.inventory_scan_btn'))
+            # Fortschrittsbalken-Optik beenden (Overlay weg + Knopftext zurueck)
+            # und den Knopf wieder freigeben (voll/leer -> normaler Knopf).
+            self._inv_scan_fill_end()
+            self._inv_scan_btn.configure(state='normal')
         except Exception:
             pass
         try:
@@ -578,8 +607,10 @@ class InventoryViewMixin:
         except Exception:
             pass
         try:
-            self._inv_scan_btn.configure(state='normal',
-                                         text=t('ui.inventory_scan_btn'))
+            # Fortschrittsbalken-Optik beenden (Overlay weg + Knopftext zurueck)
+            # und den Knopf wieder freigeben.
+            self._inv_scan_fill_end()
+            self._inv_scan_btn.configure(state='normal')
         except Exception:
             pass
         no_window = _is_no_window_error(exc)
@@ -596,6 +627,104 @@ class InventoryViewMixin:
         passiert nichts)."""
         try:
             self._inv_status.configure(text=text, text_color=color)
+        except Exception:
+            pass
+
+    # -- Scan-Knopf als Fortschrittsbalken (Fuellung links->rechts + %) --
+
+    def _inv_scan_fill_begin(self):
+        """Verwandelt den 'Inventar scannen'-Knopf fuer die Scan-Dauer in einen
+        Fortschrittsbalken: ein randloser ``CTkProgressBar`` (Spur = dunkle
+        Knopf-Flaeche, Fuellung = TEAL) liegt deckend IM Knopf, darueber zentriert
+        ein %-Label. Beide sind KINDER des Knopfes und per ``place(relwidth=1,
+        relheight=1)`` an dessen Groesse gekoppelt -- unabhaengig vom Grid. Start
+        bei 0 %. Idempotent (ein zweiter Aufruf setzt nur zurueck) + defensiv:
+        wirft nie (scheitert das Overlay, bleibt der Knopf einfach 'Scanne ...')."""
+        btn = getattr(self, '_inv_scan_btn', None)
+        if btn is None:
+            return
+        try:
+            # Leerer Knopf-Text -- die Fuellung + das %-Label IM Knopf ersetzen ihn.
+            btn.configure(text='')
+        except Exception:
+            pass
+        fill = getattr(self, '_inv_scan_fill', None)
+        if fill is not None:
+            # Schon vorhanden (Re-Entry) -> hart auf 0 zuruecksetzen. NICHT ueber
+            # _inv_scan_fill_set, dessen Monotonie-Sperre einen Ruecksprung
+            # verhinderte (sie bliebe sonst auf dem alten Prozentwert haengen).
+            try:
+                fill['pct'] = 0
+                fill['bar'].set(0.0)
+                fill['label'].configure(
+                    text=t('inventory.scan_progress_pct', pct=0))
+            except Exception:
+                pass
+            return
+        try:
+            bar = ctk.CTkProgressBar(
+                btn, corner_radius=12, border_width=0, height=44,
+                fg_color=PANEL_DARK, progress_color=TEAL)
+            bar.set(0.0)
+            # Knapp innerhalb des Knopf-Radius platzieren, damit die runden Ecken
+            # des Knopfes sichtbar bleiben (kein rechteckiger Balken-Rand).
+            bar.place(relx=0.5, rely=0.5, anchor='center',
+                      relwidth=0.965, relheight=0.80)
+            label = ctk.CTkLabel(
+                btn, text=t('inventory.scan_progress_pct', pct=0),
+                fg_color='transparent', text_color=TEXT,
+                font=ctk.CTkFont(size=14, weight='bold'))
+            label.place(relx=0.5, rely=0.5, anchor='center')
+            self._inv_scan_fill = {'bar': bar, 'label': label, 'pct': 0}
+        except Exception:
+            # Kein Overlay moeglich -> Fallback: der Knopf zeigt wieder den
+            # klassischen 'Scanne ...'-Text (nie ein leerer Knopf).
+            try:
+                btn.configure(text=t('ui.inventory_scanning'))
+            except Exception:
+                pass
+            self._inv_scan_fill = None
+
+    def _inv_scan_fill_set(self, pct):
+        """Setzt Fuellung UND %-Zahl SYNCHRON auf ``pct`` (0..100). Der Wert ist
+        monoton (springt nie zurueck), die Fuellung waechst links->rechts. Rein
+        kosmetisch + defensiv -- existiert kein Overlay, passiert nichts."""
+        fill = getattr(self, '_inv_scan_fill', None)
+        if not fill:
+            return
+        try:
+            value = int(pct)
+            if value < 0:
+                value = 0
+            elif value > 100:
+                value = 100
+            # Monoton: eine verspaetete kleinere Meldung darf den Balken nicht
+            # zurueckspringen lassen.
+            if value < fill.get('pct', 0):
+                value = fill['pct']
+            fill['pct'] = value
+            fill['bar'].set(value / 100.0)          # Fuellung (0.0..1.0)
+            fill['label'].configure(
+                text=t('inventory.scan_progress_pct', pct=value))
+        except Exception:
+            pass
+
+    def _inv_scan_fill_end(self):
+        """Beendet die Fortschritts-Optik: Overlay (Balken + %-Label) entfernen und
+        den Knopf auf seinen Ruhetext zuruecksetzen (voll/leer -> wieder ein
+        normaler Knopf). Defensiv -- wirft nie."""
+        fill = getattr(self, '_inv_scan_fill', None)
+        self._inv_scan_fill = None
+        if fill:
+            for key in ('label', 'bar'):
+                widget = fill.get(key)
+                try:
+                    if widget is not None:
+                        widget.destroy()
+                except Exception:
+                    pass
+        try:
+            self._inv_scan_btn.configure(text=t('ui.inventory_scan_btn'))
         except Exception:
             pass
 

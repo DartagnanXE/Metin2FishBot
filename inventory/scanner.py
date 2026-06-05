@@ -79,12 +79,19 @@ def classify_slot(slot_rgb, db, row, col, page=None, tol=DEFAULT_TOLERANCE):
                                empty=empty, tol=tol)
 
 
-#: Module default for the OPT-IN page-vectorised matcher. ``False`` keeps the
-#: byte-identical per-slot path (the historical behaviour); a caller turns it on
-#: per-call via ``recognize_page(..., vectorized=True)`` /
-#: ``recognize_pages(..., vectorized=True)``. Exposed as a module attribute so a
-#: future global toggle / test can flip the default without touching call sites.
-VECTORIZED_DEFAULT = False
+#: Module default for the page-vectorised matcher. The vectorised path is
+#: BIT-EXACT to the per-slot loop (pinned by tests/test_inventory_vectorized.py
+#: "BIT-for-bit") -- same masked MAD, same shift-min, same stable order -> same
+#: SlotResults -- it merely drops the 45x Python per-slot dispatch and reuses one
+#: GIL-free numpy reduction per page. There is therefore no reason to default to
+#: the slower per-slot loop: ``True`` makes the fast path the default everywhere.
+#: A caller can still force the legacy loop per-call via
+#: ``recognize_page(..., vectorized=False)`` / ``recognize_pages(...,
+#: vectorized=False)`` (used by the bit-exactness regression tests). The
+#: vectorised path itself transparently falls back to the per-slot loop whenever
+#: the batched matrix is unavailable (numpy missing / empty DB), so flipping the
+#: default on is never less capable than the loop.
+VECTORIZED_DEFAULT = True
 
 
 def recognize_page(image_bgr, db, calib=DEFAULT_CALIBRATION, lattice=None,
@@ -96,13 +103,15 @@ def recognize_page(image_bgr, db, calib=DEFAULT_CALIBRATION, lattice=None,
     row-major order. Degrades to all-unknown (logged) -- never raises -- if slot
     extraction is impossible (e.g. numpy missing).
 
-    With ``vectorized`` true (opt-in; default :data:`VECTORIZED_DEFAULT` == off)
-    the 45 slots are scored against the DB in ONE batched numpy reduction
+    With ``vectorized`` (default :data:`VECTORIZED_DEFAULT`, now ON) the 45 slots
+    are scored against the DB in ONE batched numpy reduction
     (:meth:`ItemDB.scored_for_page`) instead of a per-slot loop -- numerically
-    identical (same masked MAD, same shift min, same stable order -> same
-    SlotResults), just without the 45x Python dispatch. The vectorised path
-    falls back to the per-slot loop whenever the batched matrix is unavailable
-    (numpy missing / empty DB), so it is never less capable than the default.
+    identical (same masked MAD, same per-slot adaptive mask, same shift min, same
+    stable order -> same SlotResults), just without the 45x Python dispatch. The
+    vectorised path falls back to the per-slot loop whenever the batched matrix is
+    unavailable (numpy missing / empty DB), so it is never less capable. Pass
+    ``vectorized=False`` to force the legacy per-slot loop (the bit-exactness
+    regression tests do this to compare the two).
     """
     tol = int((calib or {}).get('tolerance', DEFAULT_TOLERANCE))
     if lattice is None:
@@ -416,15 +425,15 @@ def recognize_pages(captured, db, calib=DEFAULT_CALIBRATION,
     pool; ``max_workers <= 1`` (or a missing pool) runs a serial fallback that
     fires the same progress sequence.
 
-    OPT-IN VECTORISED PATH (``vectorized`` true; default
-    :data:`VECTORIZED_DEFAULT` == off): each PAGE is recognised as ONE batched
-    numpy reduction over its 45 slots (:func:`_recognize_page_vectorized`)
-    instead of fanning 45 individual slot tasks; the pages then fan across the
-    pool. The result map is IDENTICAL to the per-slot path (same engine, same
-    numbers); progress still advances 1..total in slot units (a page contributes
-    its 45 ticks when it completes) so the monotonic-1..total contract holds on
-    both paths. With ``vectorized`` false the original slot-fanout path runs
-    byte-for-byte unchanged.
+    VECTORISED PATH (``vectorized``, default :data:`VECTORIZED_DEFAULT`, now ON):
+    each PAGE is recognised as ONE batched numpy reduction over its 45 slots
+    (:func:`_recognize_page_vectorized`) instead of fanning 45 individual slot
+    tasks; the pages then fan across the pool (the heavy reduction is GIL-free, so
+    pages overlap). The result map is IDENTICAL to the per-slot path (same engine,
+    same per-slot adaptive mask, same numbers); progress still advances 1..total
+    in slot units (a page contributes its 45 ticks when it completes) so the
+    monotonic-1..total contract holds on both paths. Pass ``vectorized=False`` to
+    force the original slot-fanout path (byte-for-byte unchanged).
 
     Defensive: never raises. A page whose auto-align fails still classifies
     against the calibration lattice; a slot whose worker raises degrades to an
@@ -664,12 +673,21 @@ def _recognize_pages_vectorized(captured, db, calib, aligner, progress_fn,
 
 
 def _resolve_workers(max_workers, total):
-    """Clamp the worker count to a sane CPU-bound pool size.
+    """Clamp the worker count to a sane pool size for ``total`` tasks.
 
-    ``None`` -> a small pool sized to the CPU count but capped (the work is
-    short and the matcher already vectorises across references, so a huge pool
-    only adds scheduling overhead). Never exceeds the number of jobs, and is at
-    least 1. A caller can force serial with ``max_workers=1``.
+    ``None`` -> a pool sized to the CPU count, capped at :data:`_WORKER_CAP`,
+    never exceeding the number of jobs, floored at 2 (so a single-core box still
+    overlaps the matcher's GIL-free numpy with Python). A caller forces serial
+    with ``max_workers=1``.
+
+    On the DEFAULT path (page-vectorised) ``total`` == number of buffered pages
+    (<= 4), so the pool is 4 regardless of the cap -- that is already the most
+    overlap available there. MEASURED REALITY (32-core build box): beyond ~4 the
+    wall time barely moves, because the recognition's dominant cost is the printed
+    stack-count OCR (PIL, which holds the GIL) -- only the numpy MATCHER releases
+    the GIL and overlaps. So the cap is generous enough not to throttle the
+    GIL-free matcher in any larger fan-out (e.g. the per-slot fallback's 180
+    tasks) yet not so large that scheduling a huge GIL-contended pool wastes time.
     """
     if total <= 1:
         return 1
@@ -683,10 +701,15 @@ def _resolve_workers(max_workers, total):
         cpu = os.cpu_count() or 1
     except Exception:
         cpu = 1
-    # Cap at 8: beyond that the per-slot tasks (already numpy-vectorised) gain
-    # little and thread scheduling/contention starts to cost. Floor at 2 so a
-    # single-core box still overlaps the matcher's GIL-free numpy with Python.
-    return max(2, min(cpu, 8, total))
+    return max(2, min(cpu, _WORKER_CAP, total))
+
+
+#: Upper bound on the auto-sized recognise pool. The page-vectorised default fans
+#: only <= 4 page tasks, so this mainly bounds the per-slot fallback (180 tasks);
+#: raised from the old 8 so the GIL-free numpy matcher can overlap freely on a
+#: many-core box, while staying modest because the GIL-bound OCR (the dominant
+#: cost) does not scale with more threads (see :func:`_resolve_workers`).
+_WORKER_CAP = 16
 
 
 def _scan_one_page(page, capture_fn, switch_page_fn, hover_fn, verify_page_fn,

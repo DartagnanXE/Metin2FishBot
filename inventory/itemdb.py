@@ -41,7 +41,8 @@ from .constants import (
     EMPTY_FALLBACK_STD,
     VECTOR_REF_CHUNK,
 )
-from .reference import build_reference, signature_of
+from .reference import (build_reference, signature_of, slot_has_number,
+                        slots_have_numbers)
 from . import assets
 from .types import SlotResult, STATE_EMPTY, STATE_ITEM, STATE_UNKNOWN
 from i18n import t
@@ -87,19 +88,32 @@ class ItemDB:
     def __init__(self, refs):
         self._refs = list(refs or [])
         self._ref_rgb = None
-        self._mask = None
+        self._mask = None              # BAND mask (numbered slots)
         self._mask_sum3 = None
+        self._full_mask = None         # FULL mask (number-free slots)
+        self._full_mask_sum3 = None
         self._ds_ref = None
         self._ds_mask = None
         self._ds_sum = None
-        # Flattened (N, 32*32*3) views for the page-vectorised matcher.
+        # Flattened (N, 32*32*3) views for the page-vectorised matcher (one pair
+        # per adaptive mask -- BAND for numbered slots, FULL for number-free).
         self._ref_flat = None
         self._mask_flat = None
+        self._full_mask_flat = None
         if np is not None and self._refs:
             self._build_stacks()
 
     def _build_stacks(self):
-        """Stack the references into the full-res and downsampled match arrays."""
+        """Stack the references into the full-res and downsampled match arrays.
+
+        Builds BOTH adaptive mask stacks (BAND + FULL) so the matcher can pick
+        per slot: a numbered slot uses ``_mask`` / ``_mask_sum3`` /
+        ``_mask_flat`` (the historic BAND mask -- byte-identical), a number-free
+        slot uses ``_full_mask`` / ``_full_mask_sum3`` / ``_full_mask_flat``. The
+        DOWNSAMPLED alignment stack stays BAND-only (alignment never needs the
+        FULL margin, and a number-free row would only ADD matching pixels -> its
+        downsampled distance can only drop, never push a true slot off-grid).
+        """
         self._ref_rgb = np.stack(
             [r.ref_rgb for r in self._refs]).astype(np.float32)
         mask = np.stack(
@@ -108,15 +122,23 @@ class ItemDB:
         self._mask_sum3 = np.array(
             [r.mask_sum for r in self._refs], dtype=np.float32) * 3.0
 
-        # Flattened references + per-channel-broadcast mask for the page matcher.
-        # ``_ref_flat`` is (N, P) with P = 32*32*3; ``_mask_flat`` is the SAME
-        # mask broadcast to the 3 channels then flattened, so a flattened
+        full = np.stack(
+            [r.full_mask for r in self._refs]).astype(np.float32)
+        self._full_mask = full[:, :, :, None]                  # (N,32,32,1)
+        self._full_mask_sum3 = np.array(
+            [r.full_mask_sum for r in self._refs], dtype=np.float32) * 3.0
+
+        # Flattened references + per-channel-broadcast masks for the page matcher.
+        # ``_ref_flat`` is (N, P) with P = 32*32*3; each ``*_mask_flat`` is the
+        # SAME mask broadcast to the 3 channels then flattened, so a flattened
         # (slots, P) slot stack scores against all references in one reduction.
         n = self._ref_rgb.shape[0]
         self._ref_flat = np.ascontiguousarray(
             self._ref_rgb.reshape(n, -1))                      # (N, P)
         self._mask_flat = np.ascontiguousarray(
             np.repeat(mask[:, :, :, None], 3, axis=3).reshape(n, -1))  # (N, P)
+        self._full_mask_flat = np.ascontiguousarray(
+            np.repeat(full[:, :, :, None], 3, axis=3).reshape(n, -1))  # (N, P)
 
         # Downsampled (block-mean) + flattened references for alignment.
         ds_rgb = _block_mean(self._ref_rgb, ALIGN_DOWNSCALE)   # (N,h,w,3)
@@ -164,26 +186,35 @@ class ItemDB:
 
     # -- matcher core -----------------------------------------------------
 
-    def match(self, slot_rgb, shift_radius=SHIFT_RADIUS):
+    def match(self, slot_rgb, shift_radius=SHIFT_RADIUS, numbered=None):
         """``[(name, distance), ...]`` sorted ascending by masked distance.
 
         Empty list if numpy is missing, the DB is empty, or the slot is not a
         valid 32x32x3 array. ``shift_radius`` overrides the per-match shift
         search; callers that already sweep the offset externally pass ``0``.
+
+        ADAPTIVE MASK: ``numbered`` selects the reference mask -- ``True`` uses
+        the BAND mask (digits excluded; the historic behaviour), ``False`` the
+        FULL mask (wider margin). ``None`` auto-detects it from the slot via
+        :func:`inventory.reference.slot_has_number` (the normal call).
         """
         if np is None or not self._refs or not _is_slot(slot_rgb):
             return []
         slot = np.asarray(slot_rgb, dtype=np.float32)
-        dists = self._distances_all(slot, shift_radius)
+        if numbered is None:
+            numbered = slot_has_number(slot)
+        dists = self._distances_all(slot, shift_radius, numbered)
         order = np.argsort(dists, kind='stable')
         return [(self._refs[i].name, float(dists[i])) for i in order]
 
-    def best_distance(self, slot_rgb, shift_radius=SHIFT_RADIUS):
+    def best_distance(self, slot_rgb, shift_radius=SHIFT_RADIUS, numbered=None):
         """Lowest masked distance over the DB (``inf`` if none). Cheap probe."""
         if np is None or not self._refs or not _is_slot(slot_rgb):
             return _INF
         slot = np.asarray(slot_rgb, dtype=np.float32)
-        return float(self._distances_all(slot, shift_radius).min())
+        if numbered is None:
+            numbered = slot_has_number(slot)
+        return float(self._distances_all(slot, shift_radius, numbered).min())
 
     def alignment_distances(self, slot_ds_flat):
         """Vectorised masked MAD of one DOWNSAMPLED, flattened slot vs all refs.
@@ -226,7 +257,10 @@ class ItemDB:
            the same unknown is trackable across scans.
 
         ``empty`` may be passed by the caller (it already extracted the slot);
-        if ``None`` we treat the slot as occupied and rely on the threshold.
+        if ``None`` we treat the slot as occupied and rely on the threshold. The
+        ADAPTIVE MASK is selected inside :meth:`match` (auto-detected from the
+        slot's digit rows): a numbered slot scores with the BAND mask, a
+        number-free slot with the wider-margin FULL mask.
         """
         scored = self.match(slot_rgb)
         return self._decide_from_scored(scored, slot_rgb, row, col,
@@ -290,21 +324,31 @@ class ItemDB:
                           margin=margin, signature=self._signature(slot_rgb),
                           page=page, row=row, col=col)
 
-    # -- page-vectorised matcher (OPT-IN; identical numbers to the loop) ---
+    # -- page-vectorised matcher (DEFAULT; identical numbers to the loop) ---
 
     def match_page_distances(self, slots_stack, shift_radius=SHIFT_RADIUS,
-                             chunk=VECTOR_REF_CHUNK):
+                             chunk=VECTOR_REF_CHUNK, numbered=None):
         """Masked MAD of a whole PAGE of slots vs all refs in ONE batched pass.
 
         ``slots_stack`` is an ``(M, 32, 32, 3)`` float array of M extracted slots
         (row-major, e.g. all 45 of a page). Returns an ``(M, N)`` float32 matrix
         whose row ``i`` equals ``self._distances_all(slots_stack[i],
-        shift_radius)`` BIT-FOR-BIT -- it is the same masked mean-abs-diff,
-        minimised over the same integer shifts ``dy,dx in [-S..S]^2``, just
-        evaluated for every slot at once with the references CHUNKED (``chunk``
-        refs per reduction) to keep the ``(M, chunk, P)`` intermediate
-        cache-resident. ``None`` if numpy is missing, the DB is empty, or the
-        stack is not an ``(M, 32, 32, 3)`` array (caller falls back to the loop).
+        shift_radius, numbered[i])`` BIT-FOR-BIT -- it is the same masked
+        mean-abs-diff, minimised over the same integer shifts ``dy,dx in
+        [-S..S]^2``, just evaluated for every slot at once with the references
+        CHUNKED (``chunk`` refs per reduction) to keep the ``(M, chunk, P)``
+        intermediate cache-resident. ``None`` if numpy is missing, the DB is
+        empty, or the stack is not an ``(M, 32, 32, 3)`` array (caller falls back
+        to the loop).
+
+        ADAPTIVE MASK (per slot): ``numbered`` is a length-M bool sequence -- a
+        ``True`` slot is matched with the BAND mask, a ``False`` slot with the
+        FULL mask. ``None`` auto-detects it from each slot's digit rows
+        (:func:`inventory.reference.slots_have_numbers`). Slots are PARTITIONED by
+        their flag and each partition reduced against its own mask stack, so each
+        slot is scored exactly once with the right mask (no double pass). The
+        partition is reassembled in the original row-major order, so row ``i``
+        still corresponds to ``slots_stack[i]``.
 
         The whole-slot roll (``np.roll`` + edge replication on the leading-axis
         stack) is the exact batched form of :func:`_shift_edge`, so no slot is
@@ -320,6 +364,37 @@ class ItemDB:
         n = self._ref_flat.shape[0]
         if m == 0:
             return np.empty((0, n), dtype=np.float32)
+
+        flags = self._resolve_numbered(arr, numbered, m)
+        mask_idx = np.asarray(flags, dtype=bool)               # True -> BAND
+        best = np.full((m, n), _INF, dtype=np.float32)
+        # BAND partition (numbered slots) then FULL partition (number-free), each
+        # scored against ITS mask. Writing back by boolean index preserves the
+        # original row order, so row i == slots_stack[i] regardless of partition.
+        for use_band in (True, False):
+            sel = mask_idx if use_band else ~mask_idx
+            if not bool(sel.any()):
+                continue
+            mflat = self._mask_flat if use_band else self._full_mask_flat
+            msum = self._mask_sum3 if use_band else self._full_mask_sum3
+            sub = self._distances_matrix(arr[sel], mflat, msum,
+                                         shift_radius, chunk)
+            best[sel] = sub
+        return best
+
+    def _distances_matrix(self, arr, mask_flat, mask_sum3, shift_radius, chunk):
+        """``(M, N)`` masked MAD of slot stack ``arr`` vs all refs for ONE mask.
+
+        The shared batched reduction core of :meth:`match_page_distances`: shifts
+        the whole ``(M,32,32,3)`` stack over ``[-S..S]^2`` (edge-replicated, the
+        exact batched :func:`_shift_edge`), and for each shift reduces the masked
+        mean-abs-diff against ALL references with the references chunked (``chunk``
+        per reduction) so the ``(M, chunk, P)`` intermediate stays cache-resident.
+        ``mask_flat`` / ``mask_sum3`` select which adaptive mask is applied. Pure
+        numpy; never mutates ``arr`` / the DB.
+        """
+        m = arr.shape[0]
+        n = self._ref_flat.shape[0]
         try:
             ck = max(1, int(chunk))
         except Exception:
@@ -334,8 +409,8 @@ class ItemDB:
                 # whole (M, N, P) tensor is memory-bandwidth bound and slower.
                 for c0 in range(0, n, ck):
                     rc = self._ref_flat[c0:c0 + ck]             # (c, P)
-                    mc = self._mask_flat[c0:c0 + ck]            # (c, P)
-                    ms = self._mask_sum3[c0:c0 + ck]            # (c,)
+                    mc = mask_flat[c0:c0 + ck]                  # (c, P)
+                    ms = mask_sum3[c0:c0 + ck]                  # (c,)
                     diff = np.abs(flat[:, None, :] - rc[None, :, :])
                     diff *= mc[None, :, :]
                     dist = diff.sum(axis=2) / ms[None, :]       # (M, c)
@@ -343,20 +418,45 @@ class ItemDB:
                                out=best[:, c0:c0 + ck])
         return best
 
+    def _resolve_numbered(self, arr, numbered, m):
+        """Length-M bool list of the per-slot 'has a stack number' flag.
+
+        ``numbered`` may be an explicit length-M sequence (used as-is), or
+        ``None`` to auto-detect per slot from the digit rows
+        (:func:`inventory.reference.slots_have_numbers`). Falls back to all-True
+        (-> BAND for every slot = the historic behaviour, never loses an item)
+        when detection is unavailable or the length does not match.
+        """
+        if numbered is not None:
+            try:
+                flags = [bool(v) for v in numbered]
+            except Exception:
+                flags = None
+            if flags is not None and len(flags) == m:
+                return flags
+        auto = slots_have_numbers(arr)
+        if auto is not None and len(auto) == m:
+            return auto
+        return [True] * m
+
     def scored_for_page(self, slots_stack, shift_radius=SHIFT_RADIUS,
-                        chunk=VECTOR_REF_CHUNK):
+                        chunk=VECTOR_REF_CHUNK, numbered=None):
         """Per-slot sorted ``[(name, distance), ...]`` for a whole page.
 
         Wraps :meth:`match_page_distances` and applies the SAME stable argsort
         per slot that :meth:`match` does, returning a list of M scored lists (one
         per slot, ascending by distance). So feeding each list to
         :meth:`_decide_from_scored` reproduces :meth:`best_slot_result` exactly.
-        Returns ``None`` if the batched distance matrix is unavailable (caller
-        falls back to the per-slot path); an individual slot that is not a valid
-        32x32x3 array (already excluded by the stack-shape check) cannot occur
-        here.
+        ``numbered`` (a length-M bool sequence, or ``None`` to auto-detect per
+        slot) selects the adaptive mask exactly as in :meth:`match_page_distances`
+        -- so a slot scored here is byte-identical to :meth:`match` with the same
+        mask choice. Returns ``None`` if the batched distance matrix is
+        unavailable (caller falls back to the per-slot path); an individual slot
+        that is not a valid 32x32x3 array (already excluded by the stack-shape
+        check) cannot occur here.
         """
-        dists = self.match_page_distances(slots_stack, shift_radius, chunk)
+        dists = self.match_page_distances(slots_stack, shift_radius, chunk,
+                                          numbered)
         if dists is None:
             return None
         names = [r.name for r in self._refs]
@@ -368,7 +468,7 @@ class ItemDB:
 
     # -- internals --------------------------------------------------------
 
-    def _distances_all(self, slot, shift_radius=SHIFT_RADIUS):
+    def _distances_all(self, slot, shift_radius=SHIFT_RADIUS, numbered=True):
         """Vectorised best (min) masked MAD per reference over the shift search.
 
         For each integer shift ``dy,dx in [-S..S]^2`` it shifts the CAPTURED
@@ -377,13 +477,22 @@ class ItemDB:
         once, and keeps the elementwise minimum over shifts. Returns ``(N,)``
         float32 (per-channel mean in 0..255 units). Numerically identical to a
         per-reference loop. ``shift_radius == 0`` evaluates the single shift.
+
+        ADAPTIVE MASK: ``numbered`` picks the mask + normaliser -- ``True`` (the
+        default, and the historic single-mask behaviour) uses the BAND mask
+        (number band excluded), ``False`` the FULL mask (whole silhouette ->
+        wider margin for a number-free slot).
         """
+        if numbered:
+            mask, sum3 = self._mask, self._mask_sum3
+        else:
+            mask, sum3 = self._full_mask, self._full_mask_sum3
         best = np.full(len(self._refs), _INF, dtype=np.float32)
         for dy in range(-shift_radius, shift_radius + 1):
             for dx in range(-shift_radius, shift_radius + 1):
                 shifted = _shift_edge(slot, dy, dx)
-                diff = np.abs(shifted[None, ...] - self._ref_rgb) * self._mask
-                dist = diff.sum(axis=(1, 2, 3)) / self._mask_sum3
+                diff = np.abs(shifted[None, ...] - self._ref_rgb) * mask
+                dist = diff.sum(axis=(1, 2, 3)) / sum3
                 best = np.minimum(best, dist)
         return best
 

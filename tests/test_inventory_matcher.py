@@ -172,6 +172,111 @@ class TestNewFishRecognised(unittest.TestCase):
 
 
 @unittest.skipUnless(np is not None and synth is not None, 'numpy required')
+class TestAdaptiveMask(unittest.TestCase):
+    """The per-slot FULL/BAND mask selection: a numbered slot stays on the BAND
+    mask (byte-identical to the historic single mask), a number-free slot uses
+    the FULL mask and so gains a STRICTLY wider confidence margin -- and the
+    batched matcher picks the same mask per slot as the per-slot path."""
+
+    def setUp(self):
+        self.db = _db_or_skip()
+        self.refs = self.db.references()
+
+    def _margin(self, scored):
+        return scored[1][1] - scored[0][1] if len(scored) > 1 else float('inf')
+
+    def test_numbered_slot_matches_band_byte_identical(self):
+        # A slot carrying a stack number must score EXACTLY as the historic
+        # single-mask (BAND) matcher -- the adaptive path is a no-op there.
+        for ref in self.refs[:12]:
+            slot = extract_slot(synth.synth_slot(ref, number=True, noise=2.0,
+                                                 seed=1), (0, 0, 32, 32))
+            from inventory.reference import slot_has_number
+            self.assertTrue(slot_has_number(slot),
+                            'a stamped-number slot must read as numbered')
+            auto = self.db.match(slot)               # auto-detect -> BAND
+            band = self.db.match(slot, numbered=True)
+            self.assertEqual(auto, band)
+
+    def test_number_free_slot_uses_full_and_widens_margin(self):
+        # A number-free slot uses the FULL mask (auto) and still recovers itself.
+        # The FULL mask scores the extra central rows, which on the AGGREGATE
+        # widens the confidence margin: the worst-case (minimum) margin across all
+        # number-free items RISES, and the mean rises, vs the BAND mask. (Per
+        # individual close-family item the margin may move either way -- the band
+        # rows can carry sibling-distinguishing pixels -- so the guarantee is the
+        # aggregate worst case, exactly the metric that matters live.)
+        from inventory.reference import slot_has_number
+        full_margins = []
+        band_margins = []
+        for ref in self.refs:
+            slot = extract_slot(synth.synth_slot(ref, number=False, noise=2.0,
+                                                 seed=2), (0, 0, 32, 32))
+            if slot_has_number(slot):
+                continue                              # not a number-free slot
+            full = self.db.match(slot)                # auto -> FULL
+            band = self.db.match(slot, numbered=True)  # forced BAND
+            self.assertEqual(full[0][0], ref.name)
+            self.assertEqual(band[0][0], ref.name)
+            full_margins.append(self._margin(full))
+            band_margins.append(self._margin(band))
+        self.assertTrue(full_margins)
+        # Worst-case confidence improves (the key live metric) ...
+        self.assertGreater(min(full_margins), min(band_margins),
+                           'FULL must raise the worst-case number-free margin')
+        # ... and so does the average.
+        self.assertGreater(sum(full_margins) / len(full_margins),
+                           sum(band_margins) / len(band_margins),
+                           'FULL must raise the mean number-free margin')
+
+    def test_detector_threshold_boundary(self):
+        # The detector fires at >= NUMBER_DETECT_MIN_PX near-white px in the digit
+        # rows and not below. Build a slot with EXACTLY k near-white px in those
+        # rows and probe around the threshold.
+        from inventory.reference import _near_white_count_rows, slot_has_number
+        from inventory.constants import (NUMBER_DETECT_MIN_PX,
+                                         NUMBER_DETECT_WHITE)
+        base = np.zeros((32, 32, 3), dtype=np.float32)        # all-dark
+        # k-1 white px -> not numbered; k white px -> numbered. Place them in a
+        # detector row (row 20) as bright (above NUMBER_DETECT_WHITE) pixels.
+        k = NUMBER_DETECT_MIN_PX
+        below = base.copy()
+        below[20, :k - 1, :] = NUMBER_DETECT_WHITE + 20
+        self.assertEqual(_near_white_count_rows(below), k - 1)
+        self.assertFalse(slot_has_number(below))
+        at = base.copy()
+        at[20, :k, :] = NUMBER_DETECT_WHITE + 20
+        self.assertEqual(_near_white_count_rows(at), k)
+        self.assertTrue(slot_has_number(at))
+        # A near-white pixel OUTSIDE the digit rows (e.g. row 5) does not count.
+        outside = base.copy()
+        outside[5, :, :] = NUMBER_DETECT_WHITE + 20
+        self.assertEqual(_near_white_count_rows(outside), 0)
+        self.assertFalse(slot_has_number(outside))
+
+    def test_batch_flags_equal_scalar_flags(self):
+        # The vectorised per-slot detector must agree EXACTLY with the scalar one,
+        # so the batched matcher and the loop pick the same mask for every slot.
+        from inventory.reference import slot_has_number, slots_have_numbers
+        from inventory.constants import slot_indices
+        from inventory.grid import GridLattice
+        lat = GridLattice(origin=(2, 2), pitch=(32, 32))
+        layout = []
+        for i in range(45):
+            layout.append({'ref': self.refs[i % len(self.refs)],
+                           'number': (i % 2 == 0), 'noise': 2.0, 'seed': i})
+        page, _ = synth.synth_page(layout, origin=(2, 2))
+        stack = np.stack([extract_slot(page, lat.slot_box(r, c))
+                          for (r, c) in slot_indices()]).astype(np.float32)
+        batch = slots_have_numbers(stack)
+        scalar = [slot_has_number(stack[i]) for i in range(stack.shape[0])]
+        self.assertEqual(batch, scalar)
+        # And the page genuinely mixes both kinds.
+        self.assertIn(True, batch)
+        self.assertIn(False, batch)
+
+
+@unittest.skipUnless(np is not None and synth is not None, 'numpy required')
 class TestMatchMechanics(unittest.TestCase):
     def setUp(self):
         self.db = _db_or_skip()

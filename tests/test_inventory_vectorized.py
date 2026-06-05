@@ -1,13 +1,15 @@
-"""Tests for the OPT-IN page-vectorised matcher (must equal the per-slot path).
+"""Tests for the DEFAULT page-vectorised matcher (must equal the per-slot path).
 
 The matcher core can score a WHOLE page (all 45 slots) against the DB in ONE
 batched numpy reduction (``ItemDB.match_page_distances`` / ``scored_for_page``),
-and the scanner exposes it as an opt-in path (``recognize_page(...,
-vectorized=True)`` / ``recognize_pages(..., vectorized=True)``). The headline
-guarantee is byte-for-byte equivalence to the existing per-slot loop -- it is the
-SAME masked mean-abs-diff, minimised over the SAME integer shifts, so it yields
-identical SlotResults (state / name / distance / margin / signature / count). It
-only removes the 45x Python per-slot dispatch. These tests pin, all headless:
+and the scanner takes this path BY DEFAULT (``VECTORIZED_DEFAULT`` is True);
+``recognize_page(..., vectorized=False)`` / ``recognize_pages(...,
+vectorized=False)`` force the legacy per-slot loop for comparison. The headline
+guarantee is byte-for-byte equivalence between the two -- it is the SAME masked
+mean-abs-diff (with the SAME per-slot adaptive FULL/BAND mask), minimised over the
+SAME integer shifts, so it yields identical SlotResults (state / name / distance /
+margin / signature / count). It only removes the 45x Python per-slot dispatch.
+These tests pin, all headless:
 
   * MATCHER EXACTNESS -- ``match_page_distances`` row ``i`` == the per-slot
     ``_distances_all(slot_i)`` BIT-FOR-BIT (incl. glow / number / shift / noise),
@@ -16,8 +18,10 @@ only removes the 45x Python per-slot dispatch. These tests pin, all headless:
     and ``recognize_pages(vectorized=True)`` (serial AND parallel) == the
     per-slot ``recognize_pages`` -- full SlotResult tuples, on a page mixing all
     three states + stack numbers.
-  * DEFAULT OFF -- ``VECTORIZED_DEFAULT`` is False (byte-stable opt-in); the
-    no-arg recognise is the historical per-slot path.
+  * DEFAULT ON -- ``VECTORIZED_DEFAULT`` is True; the no-arg recognise takes the
+    vectorised path, and because it is BIT-IDENTICAL to the loop the resulting
+    map equals an explicit ``vectorized=False`` run exactly (the speed win is
+    free of any result change).
   * DEFENSIVE -- a bad slot stack / empty DB / numpy-off makes the batched
     primitive return None and the scanner fall back to the per-slot loop; the
     public recognise never raises.
@@ -90,15 +94,25 @@ class TestMatchPageDistancesExact(unittest.TestCase):
                          for (r, c) in slot_indices()]).astype(np.float32)
 
     def test_batched_distances_equal_per_slot_loop(self):
+        # ADAPTIVE MASK: the batched matcher picks BAND/FULL per slot (auto-
+        # detected); the per-slot matcher must be fed the SAME flag for each slot.
+        # Under that matching mask choice the batched reduction is BIT-for-bit the
+        # same masked MAD/min as the per-slot path.
+        from inventory.reference import slots_have_numbers
         stack = self._hard_stack()
+        flags = slots_have_numbers(stack)
+        self.assertEqual(len(flags), SLOTS_PER_PAGE)
         batched = self.db.match_page_distances(stack, SHIFT_RADIUS)
         self.assertIsNotNone(batched)
         self.assertEqual(batched.shape, (SLOTS_PER_PAGE, len(self.refs)))
         for i in range(SLOTS_PER_PAGE):
-            per_slot = self.db._distances_all(stack[i], SHIFT_RADIUS)
-            # BIT-for-bit: the batched reduction is the same masked MAD/min.
+            per_slot = self.db._distances_all(stack[i], SHIFT_RADIUS, flags[i])
             self.assertTrue(np.array_equal(batched[i], per_slot),
                             'row %d differs from the per-slot matcher' % i)
+        # The page really exercises BOTH masks (some numbered, some not), so the
+        # bit-exactness is asserted across the partition boundary, not trivially.
+        self.assertIn(True, flags)
+        self.assertIn(False, flags)
 
     def test_scored_lists_match_per_slot_match(self):
         stack = self._hard_stack()
@@ -202,16 +216,27 @@ class TestRecognizeVectorizedEqualsLoop(unittest.TestCase):
         counts = [t[8] for t in base.values() if t[3] == STATE_ITEM]
         self.assertTrue(any(c is not None for c in counts))
 
-    def test_vectorized_default_is_off(self):
-        # Opt-in: the module default must be False so the no-arg recognise stays
-        # byte-identical to the historical per-slot path.
-        self.assertIs(scanner.VECTORIZED_DEFAULT, False)
+    def test_vectorized_default_is_on_and_equals_loop(self):
+        # The module default is now True: the vectorised path is bit-exact to the
+        # loop, so the no-arg recognise takes the fast path AND yields a map that
+        # is identical to an explicit vectorized=False run (free speed, no result
+        # change). Both the default page recogniser and the default pages
+        # recogniser are pinned against the explicit loop.
+        self.assertIs(scanner.VECTORIZED_DEFAULT, True)
         captured = self._mixed_pages()
         default = scanner.recognize_pages(captured, self.db,
                                           align_fn=_fixed_align)
         loop = scanner.recognize_pages(captured, self.db,
                                        align_fn=_fixed_align, vectorized=False)
         self.assertEqual(self._full_states(default), self._full_states(loop))
+        # Same for the single-page entry point: default == explicit loop.
+        for label, image in captured.items():
+            dflt = scanner.recognize_page(image, self.db,
+                                          lattice=_FIXED_LATTICE, page=label)
+            lp = scanner.recognize_page(image, self.db, lattice=_FIXED_LATTICE,
+                                        page=label, vectorized=False)
+            self.assertEqual([_full_tuple(s) for s in dflt],
+                             [_full_tuple(s) for s in lp])
 
     def test_vectorized_falls_back_when_batch_unavailable(self):
         # With the batched primitive forced unavailable the vectorised page path

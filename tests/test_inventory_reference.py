@@ -151,6 +151,28 @@ class TestBuildReference(unittest.TestCase):
         ref = reference.build_reference('X', self._solid_icon())
         self.assertTrue(np.all(ref.weight_mask[14:25, :] == 0.0))
 
+    def test_full_mask_keeps_number_band(self):
+        # The FULL mask is the whole opaque silhouette WITHOUT the number band
+        # zeroed: for a fully-opaque icon every row (incl. 14..24) is weighted 1.
+        ref = reference.build_reference('X', self._solid_icon())
+        self.assertEqual(ref.full_mask.shape, (32, 32))
+        self.assertTrue(np.all(ref.full_mask == 1.0))
+        self.assertAlmostEqual(ref.full_mask_sum, 32 * 32, places=3)
+
+    def test_band_is_full_with_number_band_zeroed(self):
+        # BAND must equal FULL with ONLY the number-band rows zeroed -- so a
+        # numbered slot (BAND) is byte-identical to the historic single mask and
+        # the two masks differ nowhere else.
+        ref = reference.build_reference('X', self._solid_icon((40, 200, 90)))
+        derived = ref.full_mask.copy()
+        derived[14:25, :] = 0.0
+        self.assertTrue(np.array_equal(ref.weight_mask, derived))
+        # Outside the band the two masks are identical.
+        self.assertTrue(np.array_equal(ref.weight_mask[:14, :],
+                                       ref.full_mask[:14, :]))
+        self.assertTrue(np.array_equal(ref.weight_mask[25:, :],
+                                       ref.full_mask[25:, :]))
+
 
 @unittest.skipUnless(np is not None, 'numpy required')
 class TestSignature(unittest.TestCase):

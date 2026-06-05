@@ -196,10 +196,13 @@ class TestRecognizePagesParallel(unittest.TestCase):
         self.assertIsNotNone(first.count)
 
     def test_actually_runs_on_multiple_threads(self):
-        # Prove real fan-out: record the distinct worker-thread names seen while
-        # classifying. With a real pool (>1 worker) and 180 short tasks at least
-        # two threads must participate. We wrap the per-slot unit to sample the
-        # current thread name (the unit is what each future runs).
+        # Prove real fan-out on the SLOT path (vectorized=False): record the
+        # distinct worker-thread names seen while classifying. With a real pool
+        # (>1 worker) and 180 short tasks at least two threads must participate.
+        # We wrap the per-slot unit to sample the current thread name (the unit is
+        # what each future runs). The vectorised default fans PAGES instead of
+        # slots (tested in TestVectorizedThreadFanout below), so this slot-fanout
+        # assertion pins the per-slot path explicitly.
         captured = self._buffered_pages()
         seen = set()
         lock = threading.Lock()
@@ -213,11 +216,35 @@ class TestRecognizePagesParallel(unittest.TestCase):
         scanner._classify_one_slot = spy
         try:
             scanner.recognize_pages(captured, self.db, align_fn=_fixed_align,
-                                    max_workers=4)
+                                    max_workers=4, vectorized=False)
         finally:
             scanner._classify_one_slot = orig
         self.assertGreaterEqual(
             len(seen), 2, 'expected the recognise work to span >=2 threads')
+
+    def test_vectorized_default_fans_pages_across_threads(self):
+        # The vectorised default path fans whole PAGES across the pool (one
+        # GIL-free batched reduction per page). Prove real fan-out by sampling the
+        # worker-thread name inside the per-page vectorised recogniser: with 4
+        # pages and a >1 pool at least two threads must participate.
+        captured = self._buffered_pages()
+        seen = set()
+        lock = threading.Lock()
+        orig = scanner._recognize_page_vectorized
+
+        def spy(*a, **k):
+            with lock:
+                seen.add(threading.current_thread().name)
+            return orig(*a, **k)
+
+        scanner._recognize_page_vectorized = spy
+        try:
+            scanner.recognize_pages(captured, self.db, align_fn=_fixed_align,
+                                    max_workers=4)   # default vectorized=True
+        finally:
+            scanner._recognize_page_vectorized = orig
+        self.assertGreaterEqual(
+            len(seen), 2, 'expected the page recognise work to span >=2 threads')
 
     def test_empty_buffer_returns_empty_map(self):
         inv = scanner.recognize_pages({}, self.db, align_fn=_fixed_align)
@@ -226,7 +253,7 @@ class TestRecognizePagesParallel(unittest.TestCase):
 
     def test_worker_exception_degrades_slot_to_unknown(self):
         # A slot whose classification RAISES must degrade to UNKNOWN, never abort
-        # the whole recognise. Force every per-slot call to raise.
+        # the whole recognise. Force every per-slot call to raise (slot path).
         captured = self._buffered_pages()
         orig = scanner._classify_one_slot
 
@@ -236,7 +263,8 @@ class TestRecognizePagesParallel(unittest.TestCase):
         scanner._classify_one_slot = boom
         try:
             inv = scanner.recognize_pages(captured, self.db,
-                                          align_fn=_fixed_align, max_workers=4)
+                                          align_fn=_fixed_align, max_workers=4,
+                                          vectorized=False)
         finally:
             scanner._classify_one_slot = orig
         # Full shape preserved; every slot is a defensive UNKNOWN.

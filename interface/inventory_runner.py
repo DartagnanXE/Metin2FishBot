@@ -476,17 +476,21 @@ def run_inventory_scan(cfg, previous_map=None, *, log_fn=None, db=None,
         except Exception:
             pass
 
-    # OPT-IN fast path: vectorised matcher + page-fanout (bit-identical map).
-    # Default False (byte-stable); cfg['inventory']['fast_recognition'] = True
-    # turns it on. ``None`` here would use the engine default (also off).
-    fast = bool((cfg or {}).get('inventory', {}).get('fast_recognition', False))
+    # ALWAYS vectorised: the page-vectorised matcher is BIT-IDENTICAL to the
+    # per-slot loop (pinned by tests/test_inventory_vectorized.py) and strictly
+    # faster (one GIL-free numpy reduction per page instead of 45 Python slot
+    # dispatches), so the live scan always takes it -- there is no quality reason
+    # to keep the slow loop as a runtime switch. The old
+    # ``cfg['inventory']['fast_recognition']`` gate is thus vestigial here (the UI
+    # agent removes the settings checkbox); we pin ``vectorized=True`` so the live
+    # path is fast regardless of any stale config value.
     inv = scanner.recognize_pages(
         captured, db,
         calib=DEFAULT_CALIBRATION,
         progress_fn=_progress,
         align_fn=_align_only,
         record_fn=_record_page,
-        vectorized=fast,
+        vectorized=True,
     )
 
     # Toggled-shut detection: a hotkey that CLOSED the inventory yields no items

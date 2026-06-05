@@ -462,6 +462,80 @@ class TestNoGlowRegressionNoCloseFamilyConfusion(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# (3b) ADAPTIVE MASK on the real no-glow shot: number-free margins UP, numbered #
+#      margins UNCHANGED, still 33 items (the validated win, pinned).          #
+# --------------------------------------------------------------------------- #
+@unittest.skipUnless(np is not None and Image is not None and _shot_present(),
+                     'numpy/PIL/screenshot required')
+class TestAdaptiveMaskOnRealShot(unittest.TestCase):
+    """The FULL/BAND per-slot mask selection on FischOhneLeuchten.png:
+
+      * still exactly 33 items (no item lost),
+      * every NUMBERED item is byte-identical to the BAND-only matcher (the
+        historic behaviour -- distance + margin unchanged),
+      * the number-free items' WORST-CASE margin RISES vs BAND-only (the FULL
+        mask's documented +~27% margin gain; measured ~27.8 -> ~35.2).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from inventory.reference import slot_has_number
+        cls.db = ItemDB.from_bundled()
+        if not cls.db.references():
+            raise unittest.SkipTest('bundled icons / numpy unavailable')
+        cls.img = _load_bgr(_NO_GLOW_SHOT)
+        cls.lattice = grid_mod.auto_align(cls.img, cls.db, DEFAULT_CALIBRATION)
+        cls.results = scanner.recognize_page(
+            cls.img, cls.db, DEFAULT_CALIBRATION, lattice=cls.lattice, page='I')
+        cls.items = [r for r in cls.results if r.state == STATE_ITEM]
+        # Per item: detect its numbered flag + its forced-BAND distance/margin.
+        cls.numbered = {}
+        cls.band_dist = {}
+        cls.band_margin = {}
+        for r in cls.items:
+            slot = grid_mod.extract_slot(
+                cls.img, cls.lattice.slot_box(r.row, r.col))
+            cls.numbered[(r.row, r.col)] = slot_has_number(slot)
+            scored = cls.db.match(slot, numbered=True)   # forced BAND
+            best = scored[0][1]
+            margin = (scored[1][1] - best) if len(scored) > 1 else float('inf')
+            cls.band_dist[(r.row, r.col)] = best
+            cls.band_margin[(r.row, r.col)] = margin
+
+    def test_still_33_items(self):
+        self.assertEqual(len(self.items), _EXPECTED_ITEM_COUNT)
+
+    def test_numbered_items_byte_identical_to_band(self):
+        # Every item the detector flags as numbered must score EXACTLY as the
+        # BAND-only matcher (adaptive picks BAND there) -- distance AND margin.
+        any_numbered = False
+        for r in self.items:
+            if not self.numbered[(r.row, r.col)]:
+                continue
+            any_numbered = True
+            self.assertAlmostEqual(r.distance, self.band_dist[(r.row, r.col)],
+                                   places=4)
+            self.assertAlmostEqual(r.margin, self.band_margin[(r.row, r.col)],
+                                   places=4)
+        self.assertTrue(any_numbered, 'the shot must have numbered items')
+
+    def test_number_free_items_worst_margin_rises(self):
+        # The number-free items use the FULL mask; their worst-case margin must be
+        # STRICTLY larger than what the BAND-only matcher would have given them.
+        nf = [(r.row, r.col) for r in self.items
+              if not self.numbered[(r.row, r.col)]]
+        self.assertTrue(nf, 'the shot must have number-free items')
+        full_min = min(r.margin for r in self.items
+                       if (r.row, r.col) in nf)
+        band_min = min(self.band_margin[k] for k in nf)
+        self.assertGreater(full_min, band_min,
+                           'FULL mask must raise the worst number-free margin')
+        # Sanity: the documented ballpark (worst number-free margin ~35, up from
+        # ~28) -- guard loosely so it pins the WIN without being brittle.
+        self.assertGreater(full_min, 30.0)
+
+
+# --------------------------------------------------------------------------- #
 # (4) Console / map formatter output on the real 33-item map.                 #
 # --------------------------------------------------------------------------- #
 @unittest.skipUnless(np is not None and Image is not None and _shot_present(),

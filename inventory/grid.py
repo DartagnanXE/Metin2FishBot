@@ -23,12 +23,14 @@ from .constants import (
     UPPER_REGION_END,
     AUTO_ALIGN_RADIUS,
     AUTO_ALIGN_ROW_REACH,
+    AUTO_ALIGN_CACHE_REFINE,
     ACTIVE_TAB_SAMPLE,
     MATCH_THRESHOLD,
     DEFAULT_TOLERANCE,
     PAGES,
     slot_indices,
 )
+import threading
 from i18n import t
 
 try:  # pragma: no cover - exercised on machines with numpy
@@ -161,12 +163,145 @@ def upper_region_is_empty(slot_rgb, tol=DEFAULT_TOLERANCE):
     return dev <= float(tol)
 
 
+# -- SESSION CACHE: the inventory window is FIXED, so reuse the last lock -----
+#
+# A whole session scans the SAME fixed window, so after the first (~441-candidate)
+# cold sweep the grid origin no longer changes. We cache the last lock and, on the
+# next call, probe just the cached origin with a tiny DENSE +-AUTO_ALIGN_CACHE_REFINE
+# full-res sweep; a reused lock costs <<1s instead of the full sweep. The cache is
+# keyed on (calibration grid + image shape) so a different calibration / capture
+# size never reuses a stale lock, and it transparently falls back to the cold
+# sweep whenever the cheap probe cannot reproduce an adequately-fitting grid (the
+# window genuinely moved). Module-level + lock-guarded; the align-once scanner
+# calls the aligner serially, so there is no in-scan contention.
+_align_cache_lock = threading.Lock()
+_align_cache = None   # dict(key, lattice, count) or None
+
+
+def _cache_key(calib, image_bgr):
+    """Hashable identity of (calibration grid geometry, image shape).
+
+    Two scans of the SAME fixed window with the SAME calibration share a key, so
+    the cached lock is eligible for reuse; any change to the grid calibration or
+    the captured frame size yields a different key (no stale reuse). ``None`` if
+    the image has no usable shape (then caching is skipped)."""
+    grid = (calib or {}).get('grid', {})
+    try:
+        tl = tuple(grid.get('tl', [0, 0]))
+        br = tuple(grid.get('br', [0, 0]))
+        cols = int(grid.get('cols', COLS))
+        rows = int(grid.get('rows', ROWS))
+        shape = tuple(np.asarray(image_bgr).shape) if np is not None else None
+    except Exception:
+        return None
+    if shape is None:
+        return None
+    return (tl, br, cols, rows, shape)
+
+
+def reset_align_cache():
+    """Forget the cached lock (e.g. when the user re-calibrates). Never raises."""
+    global _align_cache
+    with _align_cache_lock:
+        _align_cache = None
+
+
+def _cached_lattice(key):
+    """Return the cached ``(lattice, count)`` for ``key`` (or ``None``)."""
+    with _align_cache_lock:
+        c = _align_cache
+    if c is not None and key is not None and c.get('key') == key:
+        return c.get('lattice'), int(c.get('count', 0))
+    return None
+
+
+def _store_lattice(key, lattice, count):
+    """Cache ``lattice`` (+ its match count) under ``key`` for the next scan."""
+    global _align_cache
+    if key is None or lattice is None:
+        return
+    with _align_cache_lock:
+        _align_cache = {'key': key, 'lattice': lattice, 'count': int(count)}
+
+
+def _cache_reuse_ok(refined_count, prev_count):
+    """Decide whether a refined-around-cache lock may be REUSED (vs cold sweep).
+
+    The session window is fixed, so an unmoved window keeps its item count (the
+    refine reproduces >= the cached count); moderate bag churn only nudges it. A
+    genuine window MOVE past the small refine window instead collapses the count
+    to ~0 at the stale origin -- that must fall back to the full cold sweep.
+
+      * cached bag was EMPTY (``prev_count`` <= 0): NEVER reuse. A zero count is
+        no signal at all -- the stale origin reads ~0 whether the window is still
+        there (empty) OR has moved away (items now sit elsewhere, off the refine
+        window). Trusting refine==0 would silently LOCK the stale empty origin
+        after a move and miss every item that re-appeared at the new position.
+        Falling back to the cold sweep costs one extra sweep on an empty bag but
+        always re-locks the real grid; an empty bag mislock is harmless (no item
+        to misattribute), a moved-bag mislock loses real items.
+      * cached bag had items: reuse iff the refine still finds at least HALF of
+        them (floored at 2). Half tolerates real item removal between scans while
+        still catching a move (which drops the count to ~0).
+    """
+    if prev_count <= 0:
+        return False
+    return refined_count >= max(2, prev_count // 2)
+
+
+def _refine_around(image_bgr, db, calib, center,
+                   refine=AUTO_ALIGN_CACHE_REFINE):
+    """Best lattice in a dense +-``refine`` window around ``center`` (CHEAP).
+
+    Uses the SAME cheap DOWNSAMPLED scorer as the cold sweep's per-band search
+    (:func:`_lattice_score`), ranked exactly as a band is -- max matched count,
+    then min mean distance -- plus an offset-from-``center`` final tie-break. So a
+    tiny +-3 window costs ~49 downsampled candidates (a few ms), and -- centred on
+    the previous lock -- it reproduces the cold sweep's downsampled peak EXACTLY
+    when the window is unmoved (the true peak sits at offset 0, winning the
+    tie-break). Returns ``(lattice, matched_count)`` (downsampled count, the same
+    unit the cold sweep and :func:`aligned_match_count` use) or ``None`` if every
+    candidate is off-image."""
+    cx, cy = center
+    px, py = lattice_from_calibration(calib).pitch
+    boxes = slot_indices()
+    best_key = None
+    best_lat = None
+    best_count = 0
+    for dy in range(-refine, refine + 1):
+        for dx in range(-refine, refine + 1):
+            cand = GridLattice(origin=(cx + dx, cy + dy), pitch=(px, py))
+            s = _lattice_score(image_bgr, db, cand, boxes)
+            if s is None:
+                continue
+            off = abs(dx) + abs(dy)
+            key = (-s[0], s[1], off)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_lat = cand
+                best_count = int(s[0])
+    if best_lat is None:
+        return None
+    return best_lat, best_count
+
+
 def auto_align(image_bgr, db, calib, radius=AUTO_ALIGN_RADIUS,
                row_reach=AUTO_ALIGN_ROW_REACH):
-    """Re-lock the grid for THIS image by a dense origin-offset sweep.
+    """Re-lock the grid for THIS image, REUSING the cached lock when possible.
 
-    Starts from ``lattice_from_calibration`` and tries integer origin offsets,
-    choosing the offset that
+    SESSION-CACHE fast path: the inventory window is fixed for a session, so after
+    the first cold sweep the grid origin is stable. If a lock was cached for this
+    (calibration, image-shape) key, probe ONLY the cached origin with a tiny dense
+    +-``AUTO_ALIGN_CACHE_REFINE`` full-res sweep (:func:`_refine_around`). When that
+    still locks an adequately-fitting grid (item count not collapsed vs the cached
+    lock) it is reused in <<1s -- and, being centred on the previous origin, it
+    reproduces the cold-sweep winner EXACTLY whenever the window is unmoved. If the
+    probe's count collapsed (the window moved past the refine window) the full cold
+    sweep below runs and re-seeds the cache. The cold sweep itself is unchanged, so
+    the FIRST scan and any genuine re-lock are byte-identical to before.
+
+    COLD SWEEP (:func:`_auto_align_cold`): start from ``lattice_from_calibration``
+    and try integer origin offsets, choosing the offset that
 
         maximises   the count of slots with best masked distance <= threshold,
         then minimises the mean of those matched distances,
@@ -175,23 +310,35 @@ def auto_align(image_bgr, db, calib, radius=AUTO_ALIGN_RADIUS,
     Rewarding the MATCH COUNT (rather than averaging an always-positive
     occupied distance) fixes the sparse-page failure where the old objective
     slid the grid until items fell into the dark inter-slot gaps and "won" by
-    registering zero occupied cells. The ``|dx|+|dy|`` tie-break makes an all-
-    empty page (every count 0) lock to the calibration origin, not a corner.
+    registering zero occupied cells. On an ALL-empty page every candidate ties at
+    (0 matches, inf mean), so the lock is geometry-arbitrary (it settles on a
+    band corner near calibration) -- which is harmless: with no item in any slot,
+    every origin extracts the same empty/unknown classification. The session
+    cache must NOT trust that zero-count lock though (see :func:`_cache_reuse_ok`):
+    a later window MOVE would otherwise be missed.
 
-    Search has THREE additive passes (each can only pick a STRICTLY better key,
-    so a calibration that is already correct stays put -- the nearer offset wins
-    ties):
+    The cold sweep (see :func:`_auto_align_cold`) has TWO stages (each can only
+    pick a STRICTLY better key, so a calibration that is already correct stays
+    put -- the nearer offset wins ties):
 
-      1. DENSE ``[-radius..radius]^2`` around the calibration origin (the
-         original behaviour; handles the normal small drift, dense so the 1-px
-         match-count well of a sparse page is never stepped over).
-      2. COARSE step-2 sweep that reaches ``+-(row_reach*pitch_y + radius)`` in
-         Y (and ``+-radius`` in X) -- bridges a WHOLE-ROW calibration drift
-         (e.g. an inventory that sits one slot-row higher than the bundled
-         default), which the +-radius window alone cannot reach and which
-         otherwise silently drops the off-grid row + invents a phantom one.
-      3. DENSE +-3 refine around the current winner, recovering the exact peak
-         the coarse step-2 may have straddled.
+      1. PER-ROW-BAND dense sweep: for each whole-row shift
+         ``k in [-row_reach..+row_reach]`` run a DENSE ``[-radius..radius]^2``
+         search around ``(calib_x, calib_y + k*pitch_y)`` and keep that band's
+         own best-fit representative (most matches, then lowest mean -- no
+         calibration bias inside a band). The ``k != 0`` bands bridge a WHOLE-ROW
+         calibration drift (an inventory sitting one slot-row off the bundled
+         default), which the ``+-radius`` window alone cannot reach and which
+         would otherwise drop the off-grid row + invent a phantom one. The sweep
+         is dense (every integer offset) so the 1-px match-count well of a sparse
+         page is never stepped over.
+      2. FULL-RESOLUTION cross-band re-rank: re-score the (deduplicated) band
+         representatives with the sharp full-32x32 classifier and pick the most
+         confident items, then lowest mean distance, then NEAREST to the
+         calibration origin (``|dx|+|dy|``). The proximity tie-break is decisive
+         for a full bag, where a one-row shift is an EQUAL-quality alias -- ties
+         fall back to the trusted calibration row, while a genuinely better band
+         (strictly more matches) still wins on the count. There is no extra
+         refine pass: each band representative is ALREADY its dense-sweep peak.
 
     To keep the sweep fast the scoring matches DOWNSAMPLED references
     (:meth:`ItemDB.alignment_distances`). Returns the locked
@@ -204,10 +351,43 @@ def auto_align(image_bgr, db, calib, radius=AUTO_ALIGN_RADIUS,
     if getattr(db, 'alignment_distances', None) is None:
         return base
 
+    tol = int((calib or {}).get('tolerance', DEFAULT_TOLERANCE))
+    key = _cache_key(calib, image_bgr)
+
+    # SESSION-CACHE fast path: confirm/adjust the previous lock with a tiny refine.
+    cached = _cached_lattice(key)
+    if cached is not None:
+        prev_lat, prev_count = cached
+        refined = _refine_around(image_bgr, db, calib, prev_lat.origin)
+        if refined is not None and _cache_reuse_ok(refined[1], prev_count):
+            lat, cnt = refined
+            _store_lattice(key, lat, cnt)
+            _log('inventory.grid_locked', origin=lat.origin,
+                 pitch=lat.pitch, fit=cnt)
+            return lat
+
+    lat = _auto_align_cold(image_bgr, db, calib, base, tol, radius, row_reach)
+    # Seed/refresh the cache with the cold lock + its DOWNSAMPLED match count (the
+    # same unit _refine_around / _cache_reuse_ok compare against next scan).
+    try:
+        _store_lattice(key, lat, aligned_match_count(image_bgr, db, lat))
+    except Exception:
+        pass
+    return lat
+
+
+def _auto_align_cold(image_bgr, db, calib, base, tol,
+                     radius=AUTO_ALIGN_RADIUS, row_reach=AUTO_ALIGN_ROW_REACH):
+    """The full cold origin sweep (unchanged behaviour) -> locked GridLattice.
+
+    Factored out of :func:`auto_align` so the session-cache fast path can wrap it;
+    the search itself (dense +-radius per row-band, full-res cross-band re-rank) is
+    byte-identical to the historic ``auto_align`` body, so the first scan and any
+    genuine re-lock produce exactly the same origin as before. ``base`` is the
+    calibration lattice, ``tol`` the empty/match tolerance."""
     ox, oy = base.origin
     px, py = base.pitch
     boxes = slot_indices()
-    tol = int((calib or {}).get('tolerance', DEFAULT_TOLERANCE))
 
     def band_rep(center_y):
         """Best-aligned FUZZY lattice in the dense +-radius window around
@@ -318,6 +498,14 @@ def _lattice_score(image_bgr, db, lattice, boxes, thr=MATCH_THRESHOLD):
     ``<= thr``. The candidate-origin sweep IS the offset search, so the per-slot
     distance is taken at zero internal shift (cheap). Returns ``None`` if a slot
     cannot be extracted (off-image lattice) so that candidate is skipped.
+
+    NOTE: this is the dense-sweep inner loop (called ~1300x per cold align), so it
+    keeps the per-slot ``alignment_distances`` form -- measured FASTER than a
+    batched ``(M, N, P)`` reduction here, because the downsampled reference axis is
+    small and the per-slot call reuses the cached reference stack with a tiny
+    intermediate, whereas the batch materialises a 45x-larger memory-bound tensor.
+    The cold-sweep cost is instead amortised by the SESSION CACHE (see
+    :func:`auto_align`): only the FIRST scan of a fixed window pays the full sweep.
     """
     downsample_slot = _get_downsample_slot()
     matched = 0

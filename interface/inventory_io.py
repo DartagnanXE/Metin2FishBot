@@ -36,7 +36,7 @@ except Exception:  # pragma: no cover
     log = None
 
 
-# -- module-level ItemDB cache (build the 43 refs ONCE, reuse every scan) ----
+# -- module-level ItemDB cache (build the references ONCE, reuse every scan) -
 _DB_CACHE = None
 
 

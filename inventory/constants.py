@@ -53,6 +53,38 @@ NUMBER_BAND_ROWS = range(14, 25)
 # probe and the unknown-item signature. 14 == first number-band row.
 UPPER_REGION_END = 14
 
+# -- Per-slot STACK-NUMBER detector (selects the FULL vs BAND match mask) ----
+#
+# At classify time each slot is probed for a printed stack number so the matcher
+# can pick the right reference mask (see reference.build_reference: every
+# reference carries BOTH a FULL mask -- alpha-opaque, number rows KEPT -- and a
+# BAND mask -- the same with NUMBER_BAND_ROWS zeroed). The printed digits are
+# bright near-white glyphs sitting in the LOWER half of the slot; we count the
+# near-white pixels in the digit rows and call the slot "numbered" once enough of
+# them are present:
+#
+#   * NUMBER_DETECT_ROWS -- the slot rows scanned (16..31 inclusive, i.e. the
+#     lower half where the two digit font sizes both land; measured on real
+#     captures the glyphs sit there, never in the top half).
+#   * NUMBER_DETECT_WHITE -- a pixel counts as a digit pixel when min(R,G,B) is
+#     STRICTLY above this (a near-white glyph stroke; a coloured icon pixel has
+#     at least one low channel, so it does not count).
+#   * NUMBER_DETECT_MIN_PX -- the slot is "numbered" once at least this many such
+#     near-white pixels are found in the scanned rows.
+#
+# The detector is intentionally SAFE-by-design (it can never lose an item):
+#   - false POSITIVE (flags a number where there is none) -> the slot uses the
+#     BAND mask instead of FULL = it merely forgoes the FULL-mask margin BONUS,
+#     no harm (the BAND result is exactly today's behaviour);
+#   - false NEGATIVE (misses a real number) -> practically impossible: a real
+#     stack number paints 35..140 near-white px in these rows, a bare item paints
+#     ~0, so the gap to the threshold is enormous.
+# Measured on FischOhneLeuchten: every numbered slot trips it (BAND, unchanged),
+# every number-free item stays under it (FULL, margin up), 0 items lost.
+NUMBER_DETECT_ROWS = range(16, 32)
+NUMBER_DETECT_WHITE = 190
+NUMBER_DETECT_MIN_PX = 8
+
 # Minimum alpha (0..1) for a pixel to count in the match weight mask. Anti-
 # aliased icon EDGES are semi-transparent (0 < alpha < 1); on a GLOWING slot the
 # lavender background bleeds THROUGH those partial-alpha pixels (the composite
@@ -97,7 +129,7 @@ EMPTY_FALLBACK_STD = 6.0
 # the best (lowest-distance) shift. Absorbs sub-pixel / small session offset.
 SHIFT_RADIUS = 2
 
-# OPT-IN page-vectorised matcher (inventory.itemdb.ItemDB.match_page_distances):
+# DEFAULT page-vectorised matcher (inventory.itemdb.ItemDB.match_page_distances):
 # instead of looping the masked-MAD matcher 45x per page (one Python call + one
 # numpy broadcast over the N references each), the vectorised primitive scores
 # ALL of a page's slots against ALL references in ONE batched numpy reduction
@@ -109,7 +141,7 @@ SHIFT_RADIUS = 2
 # (slots, N, 32*32*3) intermediate is memory-bandwidth bound and slower than the
 # per-slot loop if materialised whole, so references are processed VECTOR_REF_CHUNK
 # at a time -- each chunk's (slots, chunk, P) diff stays in cache. ~8 measured
-# fastest on the build box (43 refs); the result is identical for any chunk >= 1.
+# fastest on the build box (45 refs); the result is identical for any chunk >= 1.
 VECTOR_REF_CHUNK = 8
 
 # Auto-grid-alignment search radius (pixels) around the calibration origin
@@ -128,13 +160,27 @@ VECTOR_REF_CHUNK = 8
 # below keeps the dense sweep cheap.
 AUTO_ALIGN_RADIUS = 10
 
-# Beyond the dense +-radius window, auto_align runs a COARSE step-2 pass that
-# reaches +-(AUTO_ALIGN_ROW_REACH * pitch_y + radius) in Y to bridge a
-# WHOLE-ROW calibration drift (an inventory that sits one slot-row higher/lower
-# than the bundled default -- observed on foreign clients, where the +-radius
-# window alone locks one row off, silently dropping the off-grid row and
-# inventing a phantom one). A dense +-3 refine then recovers the exact peak the
-# step-2 pass may straddle. Set to 0 to restore the pure +-radius behaviour.
+# SESSION-CACHE refine radius (px) for auto_align. The inventory window is FIXED
+# for a whole session, so once the grid is locked the NEXT scan's true origin is
+# the cached one (at most a sub-pixel jitter away). auto_align therefore first
+# probes the cached origin with a tiny DENSE +-this sweep (full-res, the sharp
+# arbiter) instead of the full ~441-candidate cold sweep: if that still locks a
+# grid with adequate item count it is reused in <<1s; if the count collapsed (the
+# window genuinely moved beyond this refine) it falls back to the full cold sweep.
+# 3px comfortably covers real per-scan jitter while staying far below the
+# half-pitch alias bound, and (being centred on the previous lock) reproduces the
+# cold-sweep winner exactly whenever the window is unmoved (the session invariant).
+AUTO_ALIGN_CACHE_REFINE = 3
+
+# Number of WHOLE-ROW shifts auto_align probes on each side of the calibration
+# row to bridge a whole-row calibration drift (an inventory that sits one slot-row
+# higher/lower than the bundled default -- observed on foreign clients, where the
+# +-radius window alone locks one row off, silently dropping the off-grid row and
+# inventing a phantom one). For each k in [-this..+this] a separate DENSE +-radius
+# sweep runs around (calib_x, calib_y + k*pitch_y); the per-band winners are then
+# re-ranked at FULL resolution (most items, then lowest mean, then nearest to the
+# calibration origin). No coarse step and no separate refine pass -- each band
+# representative is already its dense-sweep peak. Set to 0 for pure +-radius.
 AUTO_ALIGN_ROW_REACH = 1
 
 # The auto-align origin sweep matches DOWNSAMPLED references/slots (block-mean

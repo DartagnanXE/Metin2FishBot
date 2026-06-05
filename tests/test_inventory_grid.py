@@ -125,6 +125,10 @@ class TestAutoAlign(unittest.TestCase):
         self.db = ItemDB.from_bundled()
         if not self.db.references():
             self.skipTest('bundled icons / numpy unavailable')
+        G.reset_align_cache()   # isolation: never reuse a prior test's lock
+
+    def tearDown(self):
+        G.reset_align_cache()
 
     def test_recovers_injected_5px_drift(self):
         refs = self.db.references()
@@ -195,6 +199,169 @@ class TestAutoAlign(unittest.TestCase):
             self.assertIsNotNone(spec, 'item reported in a planted-empty cell')
             self.assertEqual(r.name, spec['ref'].name,
                              'wrong name at ({},{})'.format(r.row, r.col))
+
+
+@unittest.skipUnless(np is not None and synth is not None, 'numpy required')
+class TestAutoAlignSessionCache(unittest.TestCase):
+    """The session cache must (a) reuse the cold lock byte-for-byte on an unmoved
+    window, (b) skip the expensive cold sweep on reuse, (c) fall back to a full
+    cold sweep that re-locks correctly when the window moves, (d) honour reset."""
+
+    def setUp(self):
+        self.db = ItemDB.from_bundled()
+        if not self.db.references():
+            self.skipTest('bundled icons / numpy unavailable')
+        G.reset_align_cache()
+
+    def tearDown(self):
+        G.reset_align_cache()
+
+    def _page(self, origin):
+        refs = self.db.references()
+        layout = [None] * (COLS * ROWS)
+        planted = [0, 1, 2, 5, 6, 11, 13, 20, 26]
+        for n, i in enumerate(planted):
+            layout[i] = {'ref': refs[(n * 3) % len(refs)], 'number': (n % 2 == 0)}
+        return synth.synth_page(layout, origin=origin, pitch=(32, 32),
+                                canvas_pad=40)[0]
+
+    def _calib(self, tl):
+        return {'grid': {'tl': list(tl),
+                         'br': [tl[0] + (COLS - 1) * 32, tl[1] + (ROWS - 1) * 32],
+                         'cols': COLS, 'rows': ROWS}, 'tolerance': 18}
+
+    def test_cache_reuse_equals_cold_lock(self):
+        page = self._page((20, 20))
+        calib = self._calib((23, 23))      # +3px drift -> cold locks (20,20)
+        cold = G.auto_align(page, self.db, calib)
+        warm = G.auto_align(page, self.db, calib)   # served from the cache
+        warm2 = G.auto_align(page, self.db, calib)
+        self.assertEqual(cold.origin, (20, 20))
+        self.assertEqual(warm.origin, cold.origin)
+        self.assertEqual(warm.pitch, cold.pitch)
+        self.assertEqual(warm2.origin, cold.origin)
+        # And the cached lock equals a FRESH cold sweep (no cache) -- proves reuse
+        # did not drift from the true cold result.
+        G.reset_align_cache()
+        fresh_cold = G.auto_align(page, self.db, calib)
+        self.assertEqual(warm.origin, fresh_cold.origin)
+
+    def test_cache_reuse_skips_cold_sweep(self):
+        # The reuse path must NOT run the cold sweep. Spy on _auto_align_cold:
+        # the first call runs it once (seeding the cache), subsequent unmoved
+        # calls must not call it again.
+        page = self._page((20, 20))
+        calib = self._calib((23, 23))
+        calls = [0]
+        orig = G._auto_align_cold
+
+        def spy(*a, **k):
+            calls[0] += 1
+            return orig(*a, **k)
+
+        G._auto_align_cold = spy
+        try:
+            G.auto_align(page, self.db, calib)
+            self.assertEqual(calls[0], 1, 'first scan must run the cold sweep')
+            G.auto_align(page, self.db, calib)
+            G.auto_align(page, self.db, calib)
+            self.assertEqual(calls[0], 1,
+                             'reused scans must NOT re-run the cold sweep')
+        finally:
+            G._auto_align_cold = orig
+
+    def test_moved_window_falls_back_and_relocks(self):
+        # Lock on a window at (20,20); then the SAME calib but a frame whose grid
+        # moved +8px (beyond the +-3 refine). The cache must fall back to a cold
+        # sweep and re-lock the new origin (== a fresh cold sweep on that frame).
+        calib = self._calib((23, 23))
+        page_a = self._page((20, 20))
+        page_b = self._page((28, 28))
+        a = G.auto_align(page_a, self.db, calib)
+        self.assertEqual(a.origin, (20, 20))
+        b = G.auto_align(page_b, self.db, calib)
+        G.reset_align_cache()
+        b_cold = G.auto_align(page_b, self.db, calib)
+        self.assertEqual(b.origin, b_cold.origin)
+        self.assertNotEqual(b.origin, a.origin)   # genuinely re-locked
+
+    def _fixed_frame(self, layout, origin):
+        """A FIXED-SIZE (like the real game window) frame: paste a small synth
+        page into a constant 400x400 canvas so the cache KEY (image shape) is
+        identical no matter where the grid sits -- the real-bot invariant that
+        makes the empty-then-moved cache trap observable."""
+        small = synth.synth_page(layout, origin=origin, pitch=(32, 32),
+                                 canvas_pad=4)[0]
+        canvas = np.zeros((400, 400, 3), dtype=np.uint8)
+        canvas[:small.shape[0], :small.shape[1]] = small
+        return canvas
+
+    def test_empty_then_moved_window_does_not_mislock(self):
+        # REGRESSION: scan an EMPTY bag (count 0 cached), then the SAME-shaped
+        # window MOVES and now holds items just outside the +-refine window. A
+        # zero cached count is NO signal -- the stale origin reads ~0 whether the
+        # (empty) window stayed or moved away. Reusing it on refine==0 would lock
+        # the stale empty origin and miss every re-appeared item. The cache must
+        # fall back to the cold sweep and re-lock the real grid.
+        refs = self.db.references()
+        items = [None] * (COLS * ROWS)
+        for n, i in enumerate([0, 1, 2, 5, 6, 11, 13, 20, 26]):
+            items[i] = {'ref': refs[(n * 3) % len(refs)], 'number': (n % 2 == 0)}
+        empty = self._fixed_frame([None] * (COLS * ROWS), (40, 40))
+        calib = self._calib((40, 40))
+        G.auto_align(empty, self.db, calib)            # seeds count 0
+        for mv in (44, 48):                            # +4 / +8px, past +-3 refine
+            moved = self._fixed_frame(items, (mv, mv))
+            warm = G.auto_align(moved, self.db, calib)
+            G.reset_align_cache()
+            cold = G.auto_align(moved, self.db, calib)
+            self.assertEqual(warm.origin, cold.origin,
+                             'empty-count cache must not mislock after a move')
+            self.assertEqual(G.aligned_match_count(moved, self.db, warm), 9,
+                             'the re-appeared items must be found, not missed')
+            # re-seed the empty lock for the next move iteration
+            G.reset_align_cache()
+            G.auto_align(empty, self.db, calib)
+
+    def test_different_calib_does_not_reuse(self):
+        # A different calibration grid is a different cache key -> no stale reuse.
+        page = self._page((20, 20))
+        G.auto_align(page, self.db, self._calib((23, 23)))
+        # Same frame, but pretend a different calibration: the lock is still
+        # computed for THAT calib (here the same true grid -> same origin), and a
+        # spy proves a cold sweep ran (cache miss on the new key).
+        calls = [0]
+        orig = G._auto_align_cold
+
+        def spy(*a, **k):
+            calls[0] += 1
+            return orig(*a, **k)
+
+        G._auto_align_cold = spy
+        try:
+            G.auto_align(page, self.db, self._calib((20, 20)))
+            self.assertEqual(calls[0], 1, 'a new calib key must miss the cache')
+        finally:
+            G._auto_align_cold = orig
+
+    def test_reset_clears_cache(self):
+        page = self._page((20, 20))
+        calib = self._calib((23, 23))
+        G.auto_align(page, self.db, calib)
+        G.reset_align_cache()
+        calls = [0]
+        orig = G._auto_align_cold
+
+        def spy(*a, **k):
+            calls[0] += 1
+            return orig(*a, **k)
+
+        G._auto_align_cold = spy
+        try:
+            G.auto_align(page, self.db, calib)
+            self.assertEqual(calls[0], 1, 'after reset the cold sweep must re-run')
+        finally:
+            G._auto_align_cold = orig
 
 
 if __name__ == '__main__':

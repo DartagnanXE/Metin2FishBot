@@ -618,5 +618,99 @@ class TestFireOnCatch(unittest.TestCase):
         bot._fire_on_catch()   # must not propagate
 
 
+class TestTimingJitter(unittest.TestCase):
+    """``_roll_deadline`` -- the relative +-15% anti-detection timing jitter.
+
+    The three cycle waits (bait/throw/start-game) are nudged by a multiplicative
+    factor centred on 1.0 so the period is not machine-exact (the bot's
+    fingerprint), WITHOUT slowing the bot on average. ``_TIMING_JITTER == 0``
+    turns it fully off -> the EXACT base threshold (byte-stable for tests that
+    drive the timers); ``> 0`` stays inside +-jitter of the base, rolled ONCE per
+    state-entry (not re-rolled every frame).
+    """
+
+    def _bot(self, jitter):
+        bot = _bare_bot()
+        bot._TIMING_JITTER = jitter
+        bot._jitter_rolled_for = None
+        bot._action_deadline_val = 0.0
+        bot.state = 0
+        return bot
+
+    def test_zero_jitter_is_exact_threshold(self):
+        # j == 0 -> factor 1.0 -> the deadline IS the base, bit-for-bit, for any
+        # base. This is what byte-stable timer tests pin to.
+        bot = self._bot(0.0)
+        for base in (0.1, 0.5, 2.0, 7.0, 20.0):
+            bot._jitter_rolled_for = None         # force a fresh roll per base
+            self.assertEqual(bot._roll_deadline(base), float(base))
+
+    def test_zero_jitter_independent_of_random(self):
+        # With jitter off, random.uniform is never consulted: even if it were
+        # made to return an absurd factor, the deadline stays exactly the base.
+        bot = self._bot(0.0)
+        with mock.patch.object(fishingbot.random, 'uniform',
+                               return_value=999.0):
+            self.assertEqual(bot._roll_deadline(2.0), 2.0)
+
+    def test_positive_jitter_within_band(self):
+        # j == 0.15 -> deadline in [base*0.85, base*1.15] for every base, over
+        # many rolls (a fresh state-entry each time).
+        bot = self._bot(0.15)
+        for base in (0.1, 0.5, 2.0, 20.0):
+            for _ in range(200):
+                bot._jitter_rolled_for = None     # simulate re-entering the state
+                d = bot._roll_deadline(base)
+                self.assertGreaterEqual(d, base * 0.85 - 1e-9)
+                self.assertLessEqual(d, base * 1.15 + 1e-9)
+
+    def test_positive_jitter_centred_on_one(self):
+        # uniform(1-j, 1+j) -> the band edges are reachable and symmetric: the
+        # min factor is 1-j, the max is 1+j (so on average no slow-down).
+        bot = self._bot(0.15)
+        with mock.patch.object(fishingbot.random, 'uniform',
+                               return_value=0.85):
+            bot._jitter_rolled_for = None
+            self.assertAlmostEqual(bot._roll_deadline(2.0), 1.7)
+        with mock.patch.object(fishingbot.random, 'uniform',
+                               return_value=1.15):
+            bot._jitter_rolled_for = None
+            self.assertAlmostEqual(bot._roll_deadline(2.0), 2.3)
+
+    def test_uniform_called_with_symmetric_bounds(self):
+        # The roll asks random.uniform for EXACTLY (1-j, 1+j) -- the contract that
+        # keeps the mean at the configured time.
+        bot = self._bot(0.15)
+        with mock.patch.object(fishingbot.random, 'uniform',
+                               return_value=1.0) as uni:
+            bot._roll_deadline(2.0)
+        uni.assert_called_once_with(0.85, 1.15)
+
+    def test_rolled_once_per_state_entry(self):
+        # Within the same state the deadline is STABLE (not re-rolled each frame)
+        # -> the threshold doesn't flicker mid-wait.
+        bot = self._bot(0.15)
+        first = bot._roll_deadline(2.0)
+        # Same state -> identical value returned, random.uniform NOT consulted.
+        with mock.patch.object(fishingbot.random, 'uniform',
+                               side_effect=AssertionError('re-rolled!')):
+            for _ in range(5):
+                self.assertEqual(bot._roll_deadline(2.0), first)
+
+    def test_rerolls_on_state_change(self):
+        # Entering a NEW state rolls a fresh deadline (keyed by self.state).
+        bot = self._bot(0.15)
+        bot.state = 0
+        with mock.patch.object(fishingbot.random, 'uniform', return_value=0.9):
+            self.assertAlmostEqual(bot._roll_deadline(2.0), 1.8)
+        bot.state = 1
+        with mock.patch.object(fishingbot.random, 'uniform', return_value=1.1):
+            self.assertAlmostEqual(bot._roll_deadline(2.0), 2.2)
+
+    def test_class_default_is_fifteen_percent(self):
+        # The shipped default jitter is +-15% (<= the user's 20% ceiling).
+        self.assertEqual(fishingbot.FishingBot._TIMING_JITTER, 0.15)
+
+
 if __name__ == '__main__':
     unittest.main()

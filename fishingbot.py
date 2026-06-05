@@ -1,6 +1,7 @@
 import pydirectinput
 import cv2 as cv
 from time import time, sleep
+import random
 from windowcapture import WindowCapture
 from hsvfilter import HsvFilter
 from i18n import t
@@ -127,6 +128,30 @@ class FishingBot(FishingDetectMixin):
     bait_time = 2
     throw_time = 2
     game_time = 2
+
+    # Anti-Erkennungs-Jitter: RELATIVE (multiplikative) Streuung der drei Zyklus-
+    # Wartezeiten (Koeder/Auswurf/Minigame-Delay). Bricht die maschinen-praezise
+    # Periodizitaet (jeder Zyklus exakt gleich getaktet = der eigentliche Bot-
+    # Fingerabdruck laut Recherche), OHNE den Bot zu drosseln: zentriert auf 1.0
+    # -> im Schnitt keine Aenderung der eingestellten Zeit; relativ -> skaliert
+    # mit ihr (0.1s -> +-0.015s, 2.0s -> +-0.3s). Das Minigame-Klicken bleibt
+    # UNBERUEHRT (seine "danebens" entstehen schon natuerlich aus der Tracking-
+    # Latenz). ``_TIMING_JITTER = 0`` schaltet es exakt ab (byte-stabil fuer Tests).
+    _TIMING_JITTER = 0.15                 # +-15% (<= die vom User gesetzte 20%-Grenze)
+    _jitter_rolled_for = None
+    _action_deadline_val = 0.0
+
+    def _roll_deadline(self, base):
+        """Gejitterte Wartezeit fuer den AKTUELLEN State -- EINMAL pro State-
+        Eintritt gewuerfelt (nicht jeden Frame neu, sonst flackert die Schwelle).
+        ``base`` = die eingestellte Zeit; Rueckgabe = ``base * uniform(1-j, 1+j)``.
+        ``_TIMING_JITTER == 0`` -> exakt ``base`` (deterministisch)."""
+        if self._jitter_rolled_for != self.state:
+            self._jitter_rolled_for = self.state
+            j = self._TIMING_JITTER
+            factor = random.uniform(1.0 - j, 1.0 + j) if j else 1.0
+            self._action_deadline_val = float(base) * factor
+        return self._action_deadline_val
 
     # Konfigurierbare In-Game-Tasten (Default = bisheriges Verhalten '2'/'1').
     # Werden von hack._on_start aus der Config injiziert, BEVOR set_to_begin
@@ -650,7 +675,7 @@ class FishingBot(FishingDetectMixin):
             # kein Koeder mehr da, stoppt _maybe_refill_bait den Bot selbst.
             self._maybe_refill_bait(screenshot)
 
-            if time() - self.timer_action > self.bait_time:
+            if time() - self.timer_action > self._roll_deadline(self.bait_time):
                 pydirectinput.keyDown(self.bait_key)
                 pydirectinput.keyUp(self.bait_key)
                 self.state = 1
@@ -663,7 +688,7 @@ class FishingBot(FishingDetectMixin):
         # State to throw the bait
 
         if self.state == 1:
-            if time() - self.timer_action > self.throw_time:
+            if time() - self.timer_action > self._roll_deadline(self.throw_time):
                 pydirectinput.keyDown(self.cast_key)
                 pydirectinput.keyUp(self.cast_key)
                 self.state = 2
@@ -673,7 +698,7 @@ class FishingBot(FishingDetectMixin):
         # Delay to start the clicks
 
         if self.state == 2:
-            if time() - self.timer_action > self.game_time:
+            if time() - self.timer_action > self._roll_deadline(self.game_time):
                 self.state = 3
                 self.timer_action = time()
                 _flog(3, t('fishing.minigame_phase_start'))

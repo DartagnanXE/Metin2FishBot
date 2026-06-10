@@ -4,6 +4,11 @@ Strings. key -> {'en': ..., 'de': ...}. {name}-Platzhalter setzt i18n.t
 per str.format ein. (Aus den Modul-Strings konvertiert, EN = Default.)"""
 
 TRANSLATIONS = {
+    # -- Seherwettstreit: Selbstdiagnose + robuste Flow-Klicks ---------------
+    'seher.diag': {'en': 'DIAGNOSIS @ step "{step}" (NCC threshold {thresh}; values are best template match, 1.0=perfect): {body}', 'de': 'DIAGNOSE @ Schritt "{step}" (NCC-Schwelle {thresh}; Werte = bester Template-Treffer, 1.0=perfekt): {body}'},
+    'seher.flow_click': {'en': 'Flow click "{label}" (NCC {ncc}), attempt {attempt}', 'de': 'Flow-Klick "{label}" (NCC {ncc}), Versuch {attempt}'},
+    'seher.flow_target_missing': {'en': 'Flow click "{label}": target not visible yet, attempt {attempt}', 'de': 'Flow-Klick "{label}": Ziel noch nicht sichtbar, Versuch {attempt}'},
+
     'ui.seher_timer_move': {'en': 'Next move in {s} s', 'de': 'Nächster Zug in {s} s'},
     'ui.seher_timer_eval': {'en': 'Waiting for round evaluation ...', 'de': 'Warte auf Rundenauswertung ...'},
     # -- Seherwettstreit: Session-Loop + Start-Flow --------------------------

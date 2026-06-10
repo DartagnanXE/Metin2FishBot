@@ -9,9 +9,20 @@ behaviour is fully preserved as the default.
 > violates the game's Terms of Service and may get your account banned. Use at
 > your own risk. See [`LICENSE.txt`](LICENSE.txt).
 
+## 🆕 What's new in 1.2.1
+
+- **Seherwettstreit start flow hardened (bugfix):** the auto-player now
+  retries each menu click (Ansehen / Start / Ja) if the game swallows a
+  click, and uses a more robust Ctrl+E. Fixes a stop where the Start button
+  was never pressed.
+- **Full self-diagnosis in the console:** if any step doesn't look as
+  expected, the bot now prints the raw match scores of every UI element it
+  looks for (not just a saved image) — so problems can be pinpointed from
+  the log alone.
+
 ## 🆕 What's new in 1.2.0
 
-- 🔮 **New tab: "Duel of the Seers" (Seherwettstreit) auto-player** *(beta)* —
+- 🔮 **New tab: "Duel of the Seers" (Seherwettstreit) auto-player** _(beta)_ —
   fully automates the card mini-game event: opens the event window (Ctrl+E),
   starts the game, plays all 9 rounds, collects the reward and repeats — until
   you press Stop, a configurable run limit is reached, or you run out of tarot
@@ -89,7 +100,7 @@ behaviour is fully preserved as the default.
   _Mark_ (calibrate once with a draggable grid overlay).
 - **Colour sampling:** _Single_ pixel (default) or _Multi_ pixel (more robust).
 
-**Duel of the Seers (Seherwettstreit) event** *(new in 1.2.0, beta)*:
+**Duel of the Seers (Seherwettstreit) event** _(new in 1.2.0, beta)_:
 
 - Auto-plays the card mini-game in a loop: start via event overview, play,
   collect reward, repeat — with run limit and an optional after-action

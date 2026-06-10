@@ -173,6 +173,7 @@ def run_seher_game(cfg, *, abort_fn=None, order='desc', debug=True,
     # -- 1. Spielfenster finden (Anker UND Spielfeld-Validierung: das
     # Info-Fenster traegt denselben Titel!) ---------------------------------
     obs = None
+    img = None
     deadline = time.time() + WINDOW_FIND_S
     while time.time() < deadline and not abort_fn():
         img = frame()
@@ -184,6 +185,10 @@ def run_seher_game(cfg, *, abort_fn=None, order='desc', debug=True,
     if obs is None or not obs.ok:
         res.error = 'seher_window'
         log.event('-', t('seher.window_not_found'))
+        try:
+            _log_diagnosis(wincap, 'spielfenster', img)
+        except Exception:
+            pass
         return res
 
     log.event('0', t('seher.window_found', x=obs.anchor[0], y=obs.anchor[1],
@@ -373,7 +378,8 @@ def run_seher_game(cfg, *, abort_fn=None, order='desc', debug=True,
 FLOW_STEP_TIMEOUT_S = 6.0
 GAME_APPEAR_TIMEOUT_S = 12.0
 REWARD_WAIT_S = 10.0
-CTRL_E_RETRIES = 2
+CTRL_E_RETRIES = 3
+CLICK_FLOW_RETRIES = 3   # verschluckte Klicks abfangen (DirectInput-Lektion)
 
 
 @dataclass
@@ -388,12 +394,18 @@ class SessionResult:
 
 
 def _press_ctrl_e():
-    """Strg+E (Tastatur braucht PAUSE 0.1, sonst schluckt DirectInput)."""
+    """Strg+E mit expliziten Holds. DirectInput verschluckt Modifier-Combos
+    bei zu kurzem Tastendruck (Lektion v1.1.1/.2 -- der erste Strg+E im
+    Live-Log von 23:30 wurde gedroppt). Darum jede Phase mit eigenem Hold."""
     old = pydirectinput.PAUSE
     pydirectinput.PAUSE = 0.1
     try:
         pydirectinput.keyDown('ctrl')
-        pydirectinput.press('e')
+        time.sleep(0.06)
+        pydirectinput.keyDown('e')
+        time.sleep(0.06)
+        pydirectinput.keyUp('e')
+        time.sleep(0.06)
         pydirectinput.keyUp('ctrl')
     finally:
         pydirectinput.PAUSE = old
@@ -427,7 +439,8 @@ def _park_cursor(wincap):
 
 
 def _save_debug_frame(img, step):
-    """Fehler-Frame als PNG neben die Config legen (Debug-Beweisbild)."""
+    """Fehler-Frame als PNG neben die Config legen (Beweisbild, falls der
+    Nutzer es doch schicken kann)."""
     try:
         import cv2
         path = sibling_path('seher_debug_{}.png'.format(step))
@@ -435,6 +448,76 @@ def _save_debug_frame(img, step):
         log.event('-', t('seher.debug_frame_saved', path=path))
     except Exception:
         pass
+
+
+def _log_diagnosis(wincap, step, img=None):
+    """KOMPLETTE Selbstdiagnose in die CONSOLE schreiben (der Nutzer kann
+    keine Dateien schicken -> alles muss als Text im Log stehen): rohe
+    Best-NCC ALLER Flow-Templates (auch unter der Schwelle), Anker,
+    Spielfeld-Check, Cursor-Position. Daraus ist die Ursache eindeutig
+    ablesbar:
+      - alle Werte niedrig  -> erwarteter Bildschirm gar nicht da
+        (Klick verschluckt / falsches/zugedecktes Fenster)
+      - EIN Wert knapp unter Schwelle (z.B. start=0.83 < 0.85) -> dein
+        Client rendert den Knopf minimal anders -> Schwelle/Template-Sache
+    """
+    from seher import flow
+    if img is None:
+        img = wincap.get_screenshot()
+    d = flow.diagnose(img)
+    parts = ['Anker={anchor} Spielfeld={game}'.format(**d)]
+    order = ['flow_event_title', 'flow_seher_label', 'flow_ansehen',
+             'flow_start_btn', 'flow_ja_btn', 'flow_reward_ok',
+             'flow_menu_charwechsel', 'flow_menu_beenden']
+    short = {'flow_event_title': 'eventtitel', 'flow_seher_label': 'seherzeile',
+             'flow_ansehen': 'ansehen', 'flow_start_btn': 'start',
+             'flow_ja_btn': 'ja', 'flow_reward_ok': 'belohnungOK',
+             'flow_menu_charwechsel': 'charwechsel',
+             'flow_menu_beenden': 'beenden'}
+    parts.append(' '.join('{}={}'.format(short[k], d[k]) for k in order))
+    try:
+        import win32api
+        cx, cy = win32api.GetCursorPos()
+        parts.append('Cursor=({},{})'.format(cx, cy))
+    except Exception:
+        pass
+    log.event('-', t('seher.diag', step=step,
+                     thresh=flow.FLOW_NCC_MIN, body=' | '.join(parts)))
+    _save_debug_frame(img, step)
+
+
+def _click_until(wincap, abort_fn, locate_fn, expect_fn, timeout, label,
+                 retries=CLICK_FLOW_RETRIES):
+    """Robuster Flow-Klick: lokalisiert das Ziel (locate_fn(img) -> (ok, pt,
+    ncc)), klickt es, wartet auf den erwarteten Folgezustand (expect_fn).
+    Bleibt der aus -> erneut lokalisieren+klicken (ein Klick kann von
+    DirectInput verschluckt werden). Liefert (ok, letzter_frame).
+
+    Ist der erwartete Folgezustand schon da, wird sofort True geliefert
+    (idempotent, falls der vorige Schritt schon durchgriff).
+    """
+    last = wincap.get_screenshot()
+    for attempt in range(1, retries + 1):
+        if abort_fn():
+            return (False, last)
+        img = wincap.get_screenshot()
+        if expect_fn(img):
+            return (True, img)
+        ok, pt, ncc = locate_fn(img)
+        if ok:
+            log.event('0', t('seher.flow_click', label=label,
+                             ncc='{:.2f}'.format(ncc), attempt=attempt))
+            _click_screen(wincap, pt)
+        else:
+            log.event('0', t('seher.flow_target_missing', label=label,
+                             attempt=attempt))
+            _wait(abort_fn, FLOW_PACE_S)  # kurz warten, evtl. rendert noch
+        ok2, img2, _ = _wait_for(wincap, abort_fn, expect_fn, timeout)
+        if img2 is not None:
+            last = img2
+        if ok2:
+            return (True, last)
+    return (False, last)
 
 
 def _wait_for(wincap, abort_fn, predicate, timeout):
@@ -493,52 +576,67 @@ def _start_flow(wincap, abort_fn):
                                    FLOW_STEP_TIMEOUT_S)
             if ok:
                 break
+            if abort_fn():
+                return ('abort', dbg)
         else:
-            _save_debug_frame(img, 'eventuebersicht')
+            _log_diagnosis(wincap, 'eventuebersicht', img)
             return ('eventuebersicht', dbg)
     if abort_fn():
         return ('abort', dbg)
 
-    # 2. Seherwettstreit-Zeile + zugehoeriges "Ansehen".
-    img = wincap.get_screenshot()
-    ok, pt, row_dbg = flow.find_ansehen_for_seher(img)
-    dbg.update(row_dbg)
-    if not ok:
-        _save_debug_frame(img, 'seher_zeile')
+    # 2. Seherwettstreit-Zeile + zugehoeriges "Ansehen" -> Start-Knopf.
+    # Klick mit Retry: ein verschluckter Ansehen-Klick (DirectInput) war die
+    # wahrscheinlichste Ursache des 23:31-Fehlers -> jetzt bis 3x.
+    def locate_ansehen(i):
+        aok, apt, adbg = flow.find_ansehen_for_seher(i)
+        dbg.update(adbg)
+        return (aok, apt, adbg.get('ansehen_ncc', 0.0))
+
+    # Erst pruefen, dass die Seher-Zeile ueberhaupt da ist (sonst falsches
+    # Event/keine Liste -> Abbruch mit voller Diagnose).
+    if not flow.find(wincap.get_screenshot(), 'flow_seher_label')[0]:
+        _log_diagnosis(wincap, 'seher_zeile')
         return ('seher_zeile', dbg)
-    log.event('0', t('seher.flow_ansehen', dbg=str(row_dbg)))
-    _click_screen(wincap, pt)
 
-    # 3. Info-Fenster mit Start-Knopf.
-    ok, img, _ = _wait_for(
-        wincap, abort_fn,
+    ok, img = _click_until(
+        wincap, abort_fn, locate_ansehen,
         lambda i: flow.find(i, 'flow_start_btn')[0] or None,
-        FLOW_STEP_TIMEOUT_S)
+        FLOW_STEP_TIMEOUT_S, label='ansehen->start')
     if not ok:
         if abort_fn():
             return ('abort', dbg)
-        _save_debug_frame(img, 'start_knopf')
+        _log_diagnosis(wincap, 'start_knopf', img)
         return ('start_knopf', dbg)
-    ok, pt, ncc = flow.find_click(img, 'flow_start_btn')
-    log.event('0', t('seher.flow_start', ncc='{:.2f}'.format(ncc)))
-    _click_screen(wincap, pt)
 
-    # 4. Teilnahme-Dialog -> Ja.
-    ok, img, _ = _wait_for(
+    # 3. Start -> Teilnahme-Dialog (Ja).
+    ok, img = _click_until(
         wincap, abort_fn,
+        lambda i: flow.find_click(i, 'flow_start_btn'),
         lambda i: flow.find(i, 'flow_ja_btn')[0] or None,
-        FLOW_STEP_TIMEOUT_S)
+        FLOW_STEP_TIMEOUT_S, label='start->ja')
     if not ok:
         if abort_fn():
             return ('abort', dbg)
-        _save_debug_frame(img, 'ja_dialog')
+        _log_diagnosis(wincap, 'ja_dialog', img)
         return ('ja_dialog', dbg)
-    ok, pt, ncc = flow.find_click(img, 'flow_ja_btn')
-    log.event('0', t('seher.flow_ja', ncc='{:.2f}'.format(ncc)))
-    _click_screen(wincap, pt)
+
+    # 4. Ja klicken, bis der Dialog VERSCHWINDET (= Klick registriert).
+    # Kommt das Spiel danach nicht, ist das KEIN Klickfehler, sondern
+    # Vorrat leer -> sauberes 'depleted' (Schritt 5).
+    ok, img = _click_until(
+        wincap, abort_fn,
+        lambda i: flow.find_click(i, 'flow_ja_btn'),
+        lambda i: (flow.looks_like_game(i)
+                   or not flow.find(i, 'flow_ja_btn')[0]) or None,
+        FLOW_STEP_TIMEOUT_S, label='ja->bestaetigt')
+    if not ok:
+        if abort_fn():
+            return ('abort', dbg)
+        _log_diagnosis(wincap, 'ja_klick', img)
+        return ('ja_dialog', dbg)
 
     # 5. Spielfenster muss erscheinen. Wenn nicht: vermutlich keine
-    # Tarotsets / kein Yang mehr -> sauberes "depleted" (keine Stoerung).
+    # Tarotsets / kein Yang mehr -> sauberes 'depleted' (keine Stoerung).
     ok, img, _ = _wait_for(
         wincap, abort_fn,
         lambda i: flow.looks_like_game(i) or None,
@@ -546,7 +644,8 @@ def _start_flow(wincap, abort_fn):
     if not ok:
         if abort_fn():
             return ('abort', dbg)
-        _save_debug_frame(img, 'kein_spielstart')
+        log.event('-', t('seher.depleted'))
+        _log_diagnosis(wincap, 'kein_spielstart', img)
         return ('depleted', dbg)
     return ('ok', dbg)
 

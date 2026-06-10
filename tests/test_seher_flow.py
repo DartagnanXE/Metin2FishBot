@@ -92,20 +92,31 @@ class _SessionPDI:
     def __init__(self, sim):
         self.sim = sim
         self.keys = []
+        self._ctrl = False
 
     def click(self, x, y, button='left'):
         self.sim.on_click(x, y)
 
+    def moveTo(self, x, y):
+        pass
+
     def keyDown(self, k):
         self.keys.append(('down', k))
+        if k == 'ctrl':
+            self._ctrl = True
 
     def keyUp(self, k):
         self.keys.append(('up', k))
+        # Strg+E wird jetzt via keyDown/keyUp('e') gesendet (gehaerteter
+        # _press_ctrl_e) -> beim Loslassen von 'e' mit gehaltenem Ctrl feuern.
+        if k == 'e':
+            self.sim.on_key('e', ctrl=self._ctrl)
+        if k == 'ctrl':
+            self._ctrl = False
 
     def press(self, k):
         self.keys.append(('press', k))
-        self.sim.on_key(k, ctrl='down' in [a for a, kk in self.keys[-3:-1]
-                                           if kk == 'ctrl' for a in [a]])
+        self.sim.on_key(k, ctrl=self._ctrl)
 
 
 class _SessionSim:
@@ -315,3 +326,41 @@ def test_looks_like_game_window_at_left_edge_no_wraparound(fx):
     # und die volle Beobachtung darf ebenfalls nicht crashen
     obs = detect.observe(shifted)
     assert obs.ok
+
+
+def test_session_recovers_from_dropped_ansehen_click(fx, monkeypatch,
+                                                     tmp_path):
+    """Kern des 1.2.1-Fixes: Wird der ERSTE Ansehen-Klick von DirectInput
+    verschluckt, muss _click_until ihn wiederholen und das Spiel trotzdem
+    starten (statt mit 'start_knopf' zu sterben wie im 23:31-Log)."""
+    import cv2
+    from interface import seher_runner as sr
+    cross = cv2.imread(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'seher', 'templates', 'cross.png'), cv2.IMREAD_COLOR)
+    sim = _SessionSim(fx, cross, games_allowed=1)
+
+    # Klick-Filter: jeder erste Klick auf ein Flow-Ziel wird "verschluckt".
+    dropped = {'count': 0}
+    real_on_click = sim.on_click
+
+    def flaky_on_click(sx, sy):
+        if sim.state in ('overview', 'info', 'confirm') and dropped['count'] < 1:
+            dropped['count'] += 1
+            return  # ersten Flow-Klick fallen lassen
+        real_on_click(sx, sy)
+    sim.on_click = flaky_on_click
+
+    pdi = _SessionPDI(sim)
+    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, 'WindowCapture', lambda name: sim)
+    _fast_timing(monkeypatch, sr)
+    monkeypatch.setattr(sr, 'results_path',
+                        lambda: str(tmp_path / 'results.jsonl'))
+    monkeypatch.setattr(sr, '_save_debug_frame', lambda img, step: None)
+
+    ses = sr.run_seher_session({}, order='desc', max_games=1,
+                               after_action='stop')
+    assert dropped['count'] == 1          # ein Klick WURDE verschluckt
+    assert ses.games_played == 1          # ... und der Retry hat es gerettet
+    assert ses.stopped_reason == 'max_games'

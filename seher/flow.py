@@ -15,7 +15,12 @@ import numpy as np
 from seher import geometry as G
 from seher.detect import _resource_dir, _roi, find_anchor
 
-FLOW_NCC_MIN = 0.88
+# 0.82: schlechtester False-Positive der Kalibrierung war 0.71 (Ja-Knopf auf
+# dem Info-Fenster) -> 0.82 haelt +0.11 Abstand UND gibt Spielraum fuer
+# Client-Rendering-Unterschiede (andere AA/Patch-Version => echte Treffer
+# koennen statt 1.0 mal ~0.85 liefern). Per diagnose() ist jeder Knapp-
+# daneben-Fall im Log sichtbar und gezielt nachjustierbar.
+FLOW_NCC_MIN = 0.82
 ROW_TOLERANCE_PX = 12
 
 _cache = {}
@@ -107,6 +112,12 @@ def looks_like_game(bgr):
     return good >= 3
 
 
+ALL_FLOW_TEMPLATES = (
+    'flow_event_title', 'flow_seher_label', 'flow_ansehen', 'flow_start_btn',
+    'flow_ja_btn', 'flow_reward_ok', 'flow_menu_charwechsel',
+    'flow_menu_beenden')
+
+
 def scan_state(bgr):
     """Debug-Uebersicht: welche Flow-Elemente sind gerade sichtbar."""
     out = {}
@@ -114,5 +125,27 @@ def scan_state(bgr):
                  'flow_ja_btn', 'flow_reward_ok', 'flow_menu_charwechsel'):
         ok, _pos, ncc = find(bgr, name)
         out[name] = round(ncc, 3) if ok else 0.0
+    out['game'] = looks_like_game(bgr)
+    return out
+
+
+def diagnose(bgr):
+    """ROHE Best-NCC ALLER Flow-Templates (auch unter der Schwelle!) +
+    Anker/Spielfeld. Macht jeden Flow-Fehler selbst-diagnostizierbar: ein
+    Wert knapp unter der Schwelle (z.B. Start-Knopf 0.83) zeigt einen
+    Client-Rendering-Unterschied; alle Werte niedrig zeigen, dass der
+    erwartete Bildschirm gar nicht da ist (Klick verschluckt / falsches
+    Fenster). Threshold zum Vergleich: FLOW_NCC_MIN."""
+    out = {'_thresh': FLOW_NCC_MIN}
+    for name in ALL_FLOW_TEMPLATES:
+        tpl = _tpl(name)
+        if tpl is None or bgr is None \
+                or bgr.shape[0] < tpl.shape[0] or bgr.shape[1] < tpl.shape[1]:
+            out[name] = -1.0
+            continue
+        res = cv2.matchTemplate(bgr, tpl, cv2.TM_CCOEFF_NORMED)
+        out[name] = round(float(res.max()), 3)
+    aok, _apos, ancc = find_anchor(bgr)
+    out['anchor'] = round(ancc, 3)
     out['game'] = looks_like_game(bgr)
     return out

@@ -127,6 +127,13 @@ class TestRunInventoryScan(unittest.TestCase):
         # present. These wiring tests simulate a present window via the fake
         # WindowCapture, so force the presence probe True (headless win32 absent).
         self._patch('_window_present', lambda: True)
+        # TOGGLE-SAFE seam: the synth canvases carry no real tab row, so the
+        # live open-probe would read CLOSED and abort the scan. Pin the
+        # historical behaviour here (one blind press -> proceed); the probe
+        # itself is covered by tests/test_inventory_open_probe.py.
+        self._patch('_ensure_inventory_open',
+                    lambda runner, hotkey: (runner.open_inventory(hotkey),
+                                            True)[1])
 
         # The runner switches tabs via pydirectinput.click; make active_page
         # report the tab whose calibrated centre matches the last click so verify

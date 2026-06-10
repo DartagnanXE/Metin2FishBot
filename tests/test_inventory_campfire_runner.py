@@ -79,7 +79,14 @@ class _WinCap:
     def get_screenshot(self):
         if np is None:                  # pragma: no cover
             return object()
-        return np.zeros((632, 802, 3), dtype=np.uint8)
+        # The toggle-safe open guard (inventory.open_probe) probes this frame
+        # BEFORE any click; stamp the real tab templates so it reads OPEN and
+        # the wrapper proceeds (exercising the probe on the real wiring path).
+        try:
+            from tests._inv_synth import stamp_open_tabs
+        except Exception:               # pragma: no cover - direct invocation
+            from _inv_synth import stamp_open_tabs
+        return stamp_open_tabs(np.zeros((632, 802, 3), dtype=np.uint8))
 
 
 class _CampfireRunnerBase(unittest.TestCase):

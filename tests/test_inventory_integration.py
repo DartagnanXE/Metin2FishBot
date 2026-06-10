@@ -751,6 +751,13 @@ class TestDifferentialThroughRunner(unittest.TestCase):
         # present. This wiring simulates a present window via the fake
         # WindowCapture, so force the presence probe True (headless win32 absent).
         self._patch('_window_present', lambda: True)
+        # TOGGLE-SAFE seam: the synth canvases carry no real tab row, so the
+        # live open-probe would read CLOSED and abort the scan. Pin the
+        # historical behaviour (one blind press -> proceed); the probe itself is
+        # covered by tests/test_inventory_open_probe.py.
+        self._patch('_ensure_inventory_open',
+                    lambda runner, hotkey: (runner.open_inventory(hotkey),
+                                            True)[1])
 
         tabs = DEFAULT_CALIBRATION['tabs']
 

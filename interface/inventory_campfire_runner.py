@@ -23,6 +23,7 @@ import constants
 from inventory.constants import DEFAULT_CALIBRATION, PAGES, OPEN_SETTLE_S, TAB_SETTLE_S
 from inventory import grid as grid_mod
 from inventory import hover
+from inventory import open_probe
 from i18n import t
 
 import inventory_campfire as campfire
@@ -130,6 +131,49 @@ def _park_cursor(offset, calib):
             pass
 
 
+def _ensure_open(wincap, offset, hotkey, calib):
+    """Toggle-safe inventory open: probe -> press only when closed -> verify.
+
+    Mirrors :func:`interface.inventory_discard_runner._ensure_open` (same
+    duplication discipline as :func:`_park_cursor`). Returns ``True`` when the
+    bag is verifiably open, ``False`` when it stays closed (caller ABORTS the
+    grill -- the tool double-click / fish drag on a CLOSED bag is a click into
+    the 3D world and walks the character off), and falls back to the historical
+    blind single press (returning ``True``) when the probe is unavailable --
+    headless only, the live EXE bundles numpy/PIL + the tab templates.
+    """
+    def _press():
+        # KEYBOARD tap needs the 0.1s down->up hold (v1.1.3 lesson) -- the
+        # module PAUSE here is the 0.05 mouse default, so force 0.1 around it.
+        old_pause = getattr(pydirectinput, 'PAUSE', None)
+        try:
+            pydirectinput.PAUSE = 0.1
+            pydirectinput.keyDown(hotkey)
+            pydirectinput.keyUp(hotkey)
+        except Exception:
+            pass
+        finally:
+            try:
+                pydirectinput.PAUSE = old_pause
+            except Exception:
+                pass
+
+    def _capture():
+        try:
+            return wincap.get_screenshot()
+        except Exception:
+            return None
+
+    ok = open_probe.ensure_inventory_open(
+        _capture, _press, calib,
+        park_fn=lambda: _park_cursor(offset, calib))
+    if ok is None:
+        _press()
+        time.sleep(OPEN_SETTLE_S)
+        return True
+    return ok
+
+
 def run_campfire_grill(cfg, states, *, log_fn=None, db=None,
                        calib=DEFAULT_CALIBRATION):
     """Open the window + inventory and grill every CAMPFIRE-marked fish.
@@ -172,15 +216,14 @@ def run_campfire_grill(cfg, states, *, log_fn=None, db=None,
     offset = (int(getattr(wincap, 'offset_x', 0) or 0),
               int(getattr(wincap, 'offset_y', 0) or 0))
 
-    # Open the inventory (TOGGLE; see inventory_runner docstring) so the scan can
-    # see the tool + fish.
+    # TOGGLE-SAFE open (the "Bot laeuft los" fix): probe the open state via the
+    # tab templates and press the (toggle!) hotkey only when the bag is actually
+    # closed -- the common trigger was Scan (leaves the bag open) -> Manage
+    # (blind press CLOSED it) -> tool double-click / drag into the 3D world.
     hotkey = (cfg or {}).get('inventory', {}).get('hotkey', 'i')
-    try:
-        pydirectinput.keyDown(hotkey)
-        pydirectinput.keyUp(hotkey)
-    except Exception:
-        pass
-    time.sleep(OPEN_SETTLE_S)
+    if not _ensure_open(wincap, offset, hotkey, calib):
+        _emit('-', 'campfire.status_not_open')
+        return campfire.CampfireResult('not_open')
 
     def capture_rgb_fn():
         try:

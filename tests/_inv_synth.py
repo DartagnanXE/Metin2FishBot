@@ -127,3 +127,28 @@ def synth_page(layout, origin=(2, 2), pitch=(SLOT_PX, SLOT_PX),
             y = oy + row * py
             page[y:y + SLOT_PX, x:x + SLOT_PX, :] = cell
     return page, (origin, pitch)
+
+
+def stamp_open_tabs(frame_bgr, calib=None):
+    """Stamp the bundled INACTIVE tab templates into ``frame_bgr`` (BGR).
+
+    After stamping, :func:`inventory.open_probe.probe_open` reads the frame as
+    OPEN (all four tabs match their inactive template -> matches=4 >= 3). Used
+    by the live-wrapper wiring tests so the toggle-safe open guard passes on a
+    synthetic full-size frame. Soft: missing numpy/PIL/templates leaves the
+    frame unchanged (the affected test then exercises the closed/abort path).
+    """
+    try:
+        from inventory.open_probe import load_tab_templates, TAB_PATCH_BOX
+        from inventory.constants import DEFAULT_CALIBRATION
+        calib = calib or DEFAULT_CALIBRATION
+        templates = load_tab_templates()
+        if not templates:
+            return frame_bgr
+        x0, x1, y0, y1 = TAB_PATCH_BOX
+        for label, tmpl in templates.items():
+            cx, cy = calib['tabs'][label]
+            frame_bgr[cy + y0:cy + y1, cx + x0:cx + x1] = tmpl.astype('uint8')
+    except Exception:
+        pass
+    return frame_bgr

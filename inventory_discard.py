@@ -195,7 +195,7 @@ class DiscardResult:
 
     Not a dataclass to stay import-light + Py-version-proof; treated read-only.
 
-    :ivar status: ``'done'`` / ``'no_items'`` / ``'error'``.
+    :ivar status: ``'done'`` / ``'no_items'`` / ``'not_open'`` / ``'error'``.
     :ivar dropped: list of ``(page, row, col, name)`` actually dropped.
     :ivar drop_point: the SCREEN ``(x, y)`` the items were dragged to (or ``None``).
     """

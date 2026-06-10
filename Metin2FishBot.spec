@@ -109,6 +109,7 @@ a = Analysis(
         ('inventory_digits', 'inventory_digits'),  # Stack-Zahlen-OCR-Templates (inventory.digits)
         ('campfire_templates', 'campfire_templates'),  # Lagerfeuer-Label-Vorlage (inventory_campfire)
         ('fishing_chat_templates', 'fishing_chat_templates'),  # Chat-OCR-Vorlagen (fishing_chat: Biss/Name-Whitelist)
+        ('inventory_tab_templates', 'inventory_tab_templates'),  # Tab-Templates Offen-Erkennung (inventory.open_probe)
         ('pieces_second.json', '.'),        # Eroeffnungsbuch
     ] + ctk_datas + tz_datas + ([(APP_ICON, '.')] if APP_ICON else []),  # Icon als Laufzeit-Datei (Fenster-Icon)
     hiddenimports=[

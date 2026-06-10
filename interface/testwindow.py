@@ -233,6 +233,31 @@ def _draw_inventory(canvas, photo_cache):
             ox + cols * px + pad, oy + rows * py + pad,
             fill='#0b0f14', outline='#3a3026', width=2)
 
+        # Tab-Reihe I..IV aus den ECHTEN gebuendelten Templates blitten, damit
+        # die Offen-Erkennung (inventory.open_probe) das Fake-Inventar als OFFEN
+        # liest und der Scan nicht mit "nicht offen" abbricht. Soft: fehlt
+        # PIL/ein Template, bleibt die Reihe weg (der Scan-Test skippt dann).
+        try:
+            import os as _os
+            from PIL import Image as _PImage, ImageTk as _PImageTk
+            from respath import resource_path as _res
+            from inventory.constants import DEFAULT_CALIBRATION as _CAL
+            from inventory.constants import PAGES as _PAGES
+            from inventory.open_probe import (
+                TAB_PATCH_BOX as _BOX, TEMPLATE_DIR as _TDIR,
+                template_filename as _tname,
+            )
+            for _label in _PAGES:
+                _cx, _cy = _CAL['tabs'][_label]
+                _img = _PImage.open(_res(_os.path.join(
+                    _TDIR, _tname(_label)))).convert('RGB')
+                _photo = _PImageTk.PhotoImage(_img)
+                photo_cache['tab_' + _label] = _photo
+                canvas.create_image(int(_cx) + _BOX[0], int(_cy) + _BOX[2],
+                                    image=_photo, anchor='nw')
+        except Exception:
+            pass
+
         name_to_path = _icon_name_to_path()
         # Eine kleine, deterministische Auswahl gut erkennbarer Items (Key-Items
         # zuerst, dann weitere, falls vorhanden), in die ersten Slots gelegt.

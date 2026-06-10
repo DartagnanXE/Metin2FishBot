@@ -298,7 +298,7 @@ class CampfireResult:
     Not a dataclass to stay import-light + Py-version-proof; treated read-only.
 
     :ivar status: ``'done'`` / ``'no_campfire_item'`` / ``'label_not_found'`` /
-        ``'no_fish'`` / ``'error'``.
+        ``'no_fish'`` / ``'not_open'`` / ``'error'``.
     :ivar grilled: list of ``(page, row, col, name)`` actually dragged.
     :ivar fire_point: the world ``(x, y)`` the fish were dropped on (or ``None``).
     :ivar label_score: the best label match score seen (diagnostic).

@@ -24,11 +24,14 @@ new scan against it and emits EXACTLY ONE warning per NEWLY-appeared unrecognise
 item (never for long-standing unknowns, recognised items, or vanished slots),
 and best-effort saves that item's 32x32 crop so the user can add an icon.
 
-KNOWN LIMITATION (documented; roadmap): the inventory hotkey is a TOGGLE in
-Metin2. If the inventory was ALREADY open, our open-press CLOSES it and the scan
-sees no grid. We detect that (no confident slot on ANY page) and warn
-``inventory.scan_not_open`` instead of dumping an all-unknown map; we do NOT
-auto-press twice (racey). A future open-state probe before pressing is the fix.
+TOGGLE-SAFE OPEN (the fix for the old "hotkey toggled it shut" limitation):
+the inventory hotkey is a TOGGLE in Metin2, so before any press the runner now
+PROBES the open state via :func:`inventory.open_probe.ensure_inventory_open`
+(template match on the four page tabs) and presses only when the bag is
+actually closed, re-verifying after every press. If the bag cannot be verified
+open the scan ABORTS with ``inventory.scan_not_open`` BEFORE any tab click --
+a tab click on a closed bag lands in the 3D world and walks the character off.
+The post-scan all-unknown check stays as a second line of defence.
 
 ROADMAP: item HANDLING (move / use / delete a tracked key item) is out of scope.
 The seam is :meth:`InventoryMap.tracked` / :meth:`InventoryMap.locations` plus
@@ -40,6 +43,7 @@ import time
 
 from inventory import grid as grid_mod
 from inventory import scanner, report, hover
+from inventory import open_probe
 from inventory.diff import diff_maps
 from inventory.constants import (
     DEFAULT_CALIBRATION,
@@ -164,18 +168,57 @@ class _Runner:
     def open_inventory(self, hotkey):
         """Press the configurable inventory hotkey (a key tap), then settle.
 
-        NOTE: this hotkey is a TOGGLE; we open + scan but deliberately do NOT
-        auto-close (a second press would race the scan). See module docstring.
+        NOTE: this hotkey is a TOGGLE; the caller decides WHETHER to press (see
+        :func:`_ensure_inventory_open`) -- this method only performs the tap.
+
+        PER-OPERATION PAUSE (the v1.1.3 lesson): the scan flow forces the
+        module PAUSE to 0.05 for its mouse work, but a KEYBOARD tap needs the
+        0.1s down->up hold or the game's per-frame DirectInput poll ignores it
+        entirely (exactly the v1.1.1/v1.1.2 fishing-key regression). Force 0.1
+        around this one tap and restore afterwards.
         """
         if pydirectinput is None:
             return
+        old_pause = getattr(pydirectinput, 'PAUSE', None)
         try:
+            pydirectinput.PAUSE = 0.1   # keyboard hold; mouse stays 0.05
             pydirectinput.keyDown(hotkey)
             pydirectinput.keyUp(hotkey)
         except Exception as exc:
             _warn('inventory.scan_page_failed', page='open',
                   detail=str(exc)[:120])
+        finally:
+            try:
+                pydirectinput.PAUSE = old_pause
+            except Exception:
+                pass
         time.sleep(OPEN_SETTLE_S)
+
+    def park_cursor(self):
+        """MOVE the cursor to the neutral off-tab park point (never a click).
+
+        Used before every open-probe capture so the hardware cursor / a tab
+        tooltip cannot sit on the tab row and distort the probe. Same park
+        point + PAUSE=0 discipline as :meth:`switch_page`. Non-fatal on error.
+        """
+        if pydirectinput is None:
+            return
+        try:
+            park = hover.to_screen([hover.tab_park_point(self.calib)],
+                                   self.offset)[0]
+        except Exception:
+            return
+        old_pause = getattr(pydirectinput, 'PAUSE', None)
+        try:
+            pydirectinput.PAUSE = 0
+            pydirectinput.moveTo(park[0], park[1])
+        except Exception:
+            pass
+        finally:
+            try:
+                pydirectinput.PAUSE = old_pause
+            except Exception:
+                pass
 
     def capture(self):
         """Capture one BGR frame via the open window."""
@@ -363,6 +406,34 @@ class _Runner:
         return None
 
 
+def _ensure_inventory_open(runner, hotkey):
+    """Toggle-safe open for the scan flow (module-level so tests can patch it).
+
+    Wraps :func:`inventory.open_probe.ensure_inventory_open` with the runner's
+    capture / key-tap / cursor-park primitives. Returns ``True`` (verified
+    open), ``False`` (caller must abort -- a tab click on a closed bag walks
+    the character into the world), or falls back to the historical single
+    blind press and returns ``True`` when the probe is unavailable (headless;
+    the live EXE always bundles numpy/PIL + the templates).
+
+    With NO input device at all (``pydirectinput`` is None: headless tests /
+    the fake test window, which is drawn already-open) there is nothing that
+    could click into the world, so the guard passes -- the historical
+    behaviour for that path.
+    """
+    if pydirectinput is None:
+        return True
+    ok = open_probe.ensure_inventory_open(
+        runner.capture,
+        lambda: runner.open_inventory(hotkey),
+        runner.calib,
+        park_fn=runner.park_cursor)
+    if ok is None:
+        runner.open_inventory(hotkey)
+        return True
+    return ok
+
+
 # -- cross-session grid-lock persistence ------------------------------------
 # The inventory window is FIXED per install, so the auto_align lock found by the
 # first (cold, ~seconds) sweep is reusable next session. We persist it to a tiny
@@ -481,7 +552,15 @@ def run_inventory_scan(cfg, previous_map=None, *, log_fn=None, db=None,
 
     runner.open_window()                       # may raise 'not found' (UI handles)
     hotkey = (cfg or {}).get('inventory', {}).get('hotkey', 'i')
-    runner.open_inventory(hotkey)
+    # TOGGLE-SAFE: probe the open state and press only when actually closed
+    # (see module docstring). On a verified-closed bag we ABORT before any tab
+    # click -- clicking a tab position on a closed bag is a left-click into the
+    # 3D world and walks the character off.
+    if not _ensure_inventory_open(runner, hotkey):
+        _warn('inventory.scan_not_open')
+        _emit_line(sink, t('inventory.scan_not_open'))
+        from inventory.types import InventoryMap
+        return InventoryMap(pages={})
 
     # PHASE 1 (fast capture): buffer each page's raw frame; remember the last as
     # the crop fallback. No hover, no recognition -- just switch + capture.

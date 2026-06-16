@@ -118,7 +118,7 @@ SHOP_DAGGER_CELL = 32              # Zellgroesse fuer die NCC-Verifikation
 # Gruener NPC-Name ("Alchemist" / "Waffenhaendler") in der Spielszene. Gemessen:
 # Alchemist-Label bei (339,228), Waffenhaendler bei (396,211) -- beide im
 # oberen Szenen-Drittel. Suchregion bewusst grosszuegig (NPC-Position variiert).
-ROI_NPC_SEARCH = (150, 100, 470, 320)   # KALIBRIER-BAR (== geometry.ROI_SCENE)
+ROI_NPC_SEARCH = (80, 90, 540, 380)   # KALIBRIER-BAR (== geometry.ROI_SCENE); an ALLEN 17 NPC-Bildern gemessen: Name liegt je nach Kamerawinkel bei x 126..565 / y 106..429 -> Suchfenster deckt die volle Spanne mit Rand ab (frueher 150/100/470/320 schnitt Rand-NPCs ab -> ncc=0.0)
 # Anvisierter NPC: gelber Abwaerts-Pfeil ueber dem Kopf (gemessen im Alchemist-
 # Bild: gesaettigtes Gelb R>180,G>160,B<120 im oberen Szenen-Bereich). Nach
 # RECHTSKLICK zusaetzlich eine ROTE Auswahl-Markierung an den NPC-Fuessen.

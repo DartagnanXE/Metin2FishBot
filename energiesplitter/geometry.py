@@ -45,8 +45,10 @@ GAME_SIZE_TOLERANCE = 8
 
 # -- ROIs im 800x600-CLIENT (x, y, w, h) -- alle # KALIBRIER-BAR -------------
 # Spielszene (ohne HUD oben/unten/rechts) -- Suchbereich fuer den gruenen
-# NPC-Namen. y>=100 schneidet die Titel-/Buff-Leiste, x<=620 den rechten HUD-Rand.
-ROI_SCENE = (150, 100, 470, 320)        # KALIBRIER-BAR
+# NPC-Namen. An ALLEN 17 NPC-Bildern gemessen (Name x 126..565 / y 106..429 je
+# nach Kamerawinkel) -> grosszuegiges Fenster mit Rand; bleibt links vom rechten
+# HUD-Panel (~625) und ueber der unteren Skill-Leiste (~520). == ROI_NPC_SEARCH.
+ROI_SCENE = (80, 90, 540, 380)        # KALIBRIER-BAR
 # Header-Streifen eines geoeffneten Panels (Laden/Inventar/Ausruestung).
 ROI_PANEL_HEADER = (350, 18, 200, 24)   # KALIBRIER-BAR
 # Block der Dialog-Zeilen (zentriert); Y dynamisch (6 vs 7 Zeilen) -> grosszuegig.

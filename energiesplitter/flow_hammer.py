@@ -41,7 +41,7 @@ class HammerFlowMixin:
       return
 
     if st == self.ST_APPROACH_NPC:
-      pt = self.approach_npc('npc_alchemist')
+      pt = self.approach_npc('alchemist')
       if pt is None:
         return  # approach_npc hat ggf. schon gestoppt / Vogelperspektive
       self._npc_pt = pt

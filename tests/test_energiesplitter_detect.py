@@ -475,6 +475,46 @@ class TestLoadTemplate(unittest.TestCase):
     def test_load_unknown_none(self):
         self.assertIsNone(d.load_template('does_not_exist'))
 
+    def test_load_npc_prefix_tolerated(self):
+        # Robustheit: ein versehentlich 'npc_'-praefixierter Schluessel (das
+        # npc/-Verzeichnis liefert _npc_path schon) muss DENNOCH laden -- sonst
+        # liefert find_npc_name still ncc=0.0 (= der "NPC nicht gefunden"-Bug
+        # trotz vorhandener Vorlage).
+        self.assertIsNotNone(d.load_template('npc_alchemist'))
+        self.assertIsNotNone(d.load_template('npc_waffenhaendler'))
+
+
+class TestNpcFoundAcrossAllPerspectives(unittest.TestCase):
+    """Der NPC-Name muss in ALLEN gelieferten Perspektiven gefunden werden
+    (8 Alchemist + 9 Waffenschmied). 'Mit allen Bildern validiert'-Garantie:
+    schlaegt ein Kamerawinkel durch, faellt dieser Test um. Deckt die drei real
+    aufgetretenen Fehler ab: (1) Template lud nicht ('npc_'-Prefix -> None ->
+    ncc=0.0), (2) Suchfenster (ROI) schnitt Rand-NPCs ab, (3) Erkennung selbst.
+    Nutzt die GEBUNDELTEN Templates + die Default-ROI (keine Test-Sonderwerte)."""
+
+    def _assert_all(self, group, npc_key):
+        tpl = d.load_template(npc_key)
+        self.assertIsNotNone(tpl, 'Template fehlt: %s' % npc_key)
+        folder = os.path.join(_FIX, group)
+        names = sorted(n for n in os.listdir(folder)
+                       if n.lower().endswith('.png'))
+        self.assertGreaterEqual(len(names), 8, 'zu wenig Fixtures: %s' % group)
+        misses = []
+        for name in names:
+            img = _load(group, name)
+            ok, pt, ncc = d.find_npc_name(img, tpl)
+            if not ok or pt is None:
+                misses.append('%s (ncc=%.3f)' % (name, ncc))
+        self.assertEqual(misses, [],
+                         '%s in diesen Perspektiven NICHT gefunden: %s'
+                         % (npc_key, misses))
+
+    def test_alchemist_all_perspectives(self):
+        self._assert_all('Alchemist', 'alchemist')
+
+    def test_waffenhaendler_all_perspectives(self):
+        self._assert_all('Waffenschmied', 'waffenhaendler')
+
 
 if __name__ == '__main__':
     unittest.main()

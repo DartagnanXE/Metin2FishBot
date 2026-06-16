@@ -3,6 +3,27 @@
 Alle nennenswerten Aenderungen an diesem Projekt werden hier festgehalten.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 
+## [1.2.12] — 2026-06-16
+
+### Behoben (Energiesplitter: NPC-Erkennung – jetzt in ALLEN Perspektiven)
+
+Der NPC wurde trotz sichtbarem grünem Namen nie erkannt (`ncc=0.0`). Drei
+Ursachen, gegen **alle 17 gelieferten NPC-Bilder** (8 Alchemist + 9
+Waffenschmied) gemessen und behoben:
+
+- **Template wurde nie geladen.** Der Such-Schlüssel war `npc_alchemist`, das
+  Verzeichnis liefert aber bereits `npc/` → gesucht wurde `npc/npc_alchemist.png`
+  statt `npc/alchemist.png` → Vorlage = leer → `find_npc_name` lieferte glatt
+  `0.0`. Behoben (korrekter Schlüssel + `load_template` toleriert das Präfix
+  zusätzlich defensiv).
+- **Suchfenster schnitt Rand-NPCs ab.** Je nach Kamerawinkel liegt der Name bei
+  x 126…565 / y 106…429; das alte Fenster (x 150…620, y 100…420) schnitt linke/
+  untere Lagen ab. Region an der vollen gemessenen Spanne neu kalibriert.
+- **Validiert über alle Perspektiven:** Mit der gebündelten Vorlage + grüner
+  Maske wird der Name jetzt in **allen 8 Alchemist- und 9 Waffenschmied-Bildern**
+  gefunden (NCC 0.87–0.99). Ein neuer Test prüft das dauerhaft in der CI — fällt
+  ein Kamerawinkel durch, schlägt er fehl.
+
 ## [1.2.11] — 2026-06-16
 
 ### Behoben (Energiesplitter: Spiel-Fenster wird beim Lauf fokussiert)

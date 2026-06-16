@@ -641,7 +641,16 @@ def load_template(key):
     item = _imread(_item_path(key))
     if item is not None:
         return item
-    return _imread(_npc_path(key))
+    npc = _imread(_npc_path(key))
+    if npc is not None:
+        return npc
+    # Robustheit: ein versehentlich mit 'npc_' praefixierter Schluessel (das
+    # npc/-Verzeichnis liefert _npc_path schon) -> Prefix strippen und erneut
+    # versuchen. Verhindert das stille None (-> find_npc_name ncc=0.0), das den
+    # NPC frueher 'nicht gefunden' erscheinen liess, obwohl die Vorlage da ist.
+    if key.startswith('npc_'):
+        return _imread(_npc_path(key[len('npc_'):]))
+    return None
 
 
 def count_item(bgr, item):

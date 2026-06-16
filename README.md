@@ -9,6 +9,17 @@ behaviour is fully preserved as the default.
 > violates the game's Terms of Service and may get your account banned. Use at
 > your own risk. See [`LICENSE.txt`](LICENSE.txt).
 
+## 🆕 What's new in 1.2.12
+
+- **Energiesplitter: NPC recognition now works across all camera angles.** The
+  NPC name was never recognised (`ncc=0.0`) despite being clearly visible. Fixed,
+  validated against **all 17 provided NPC images** (8 Alchemist + 9 weapon
+  dealer): (1) the name template was never loaded (a doubled `npc_` key →
+  `npc/npc_alchemist.png` instead of `npc/alchemist.png`), (2) the search region
+  cropped NPCs pushed to the screen edge by the camera (recalibrated to the full
+  measured span), (3) a new CI test asserts the NPC is found in every provided
+  perspective (NCC 0.87–0.99).
+
 ## 🆕 What's new in 1.2.11
 
 - **Energiesplitter: the game window is now focused during a run.** Keystrokes

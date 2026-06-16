@@ -54,7 +54,7 @@ class DaggerFlowMixin:
       return
 
     if st == self.ST_APPROACH_NPC:
-      pt = self.approach_npc('npc_waffenhaendler')
+      pt = self.approach_npc('waffenhaendler')
       if pt is None:
         return
       self._npc_pt = pt

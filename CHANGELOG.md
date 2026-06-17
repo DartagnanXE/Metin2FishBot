@@ -3,6 +3,26 @@
 Alle nennenswerten Aenderungen an diesem Projekt werden hier festgehalten.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 
+## [1.2.31] — 2026-06-17
+
+### Box-Nachlegen: Puzzle-Boxen werden im Inventar jetzt zuverlässig erkannt
+
+- **Echte Ursache gefunden (aus deinem Inventar-Screenshot kalibriert).** Das
+  Nachlegen scannte zwar alle 4 Seiten, **erkannte aber keine einzige Box** und
+  stoppte mit „Boxen aufgebraucht" — obwohl die Boxen auf Seite IV lagen. Zwei
+  Gründe, beide behoben:
+  1. Die automatische Raster-Ausrichtung lag **~10 px daneben** → Slots wurden
+     versetzt abgetastet. Jetzt wird das **feste, kalibrierte Raster** genutzt.
+  2. Die Box trägt eine **große Stückzahl** (z. B. 57/104/200) in der **unteren
+     Icon-Hälfte** → das Voll-Icon passte nicht (Abweichung 41 statt <22). Jetzt
+     wird **nur die obere Icon-Hälfte** abgeglichen (die Zahl wird ignoriert).
+- **Am echten Screenshot bewiesen:** Standard-Box-Treffer mit Abweichung **≈ 1,0**
+  (perfekt), alle Nicht-Box-Slots **≥ 39** → eindeutige Trennung. Der Finder
+  erkennt im Bild korrekt die Standard-Boxen (Slot 23) und die Deluxe-Box (Slot 26).
+- Eigener, client-robuster Box-Finder (ersetzt für das Nachlegen den allgemeinen
+  Inventar-Scan, der auf dem Client nichts erkannte). 4 neue Tests inkl.
+  „erkennt trotz aufgedruckter Stückzahl".
+
 ## [1.2.30] — 2026-06-17
 
 ### Puzzle-Solver: durchgehend optimal bis zum Schluss (Finish-Modus entfernt)

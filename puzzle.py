@@ -823,9 +823,13 @@ class PuzzleBot(PuzzleDetectMixin):
         log.event(self.state, t('puzzle.box_refill_started', kind=kind))
         calib = self.box_refill_calib or _refill.DEFAULT_CALIBRATION
         try:
-            result = _refill.refill_from_inventory(
+            # Dedizierter, client-robuster Box-Finder (fester Grid + obere-
+            # Haelfte-Match) statt itemdb-Scan -- der erkannte auf dem echten
+            # Client NICHTS (Auto-Align ~10px daneben + grosse Stueckzahl
+            # ueberdeckt die untere Icon-Haelfte). Bild-validiert.
+            result = _refill.box_refill_from_inventory(
                 names, target_xy, inp=pydirectinput, wincap=self.wincap,
-                db=self.box_refill_db, calib=calib,
+                calib=calib,
                 sleep=self._refill_sleep, should_stop=self._refill_should_stop)
         except Exception:
             result = 'error'

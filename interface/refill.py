@@ -125,6 +125,33 @@ def find_first(inv, names, pages=PAGE_ORDER):
     return None
 
 
+def summarize_inventory(inv, pages=PAGE_ORDER):
+    """Kompakte Debug-Zusammenfassung des Scans: pro Seite die erkannten Item-
+    Namen + die Zahl NICHT erkannter (belegter, aber un-klassifizierter) Slots.
+
+    Genau das fehlte bei "keine Box gefunden": eine present-aber-``unknown``
+    klassifizierte Box taucht in keiner Item-Liste auf, wohl aber als ``?N``
+    (unbekannt) -- so ist sofort sichtbar, ob die Box GAR NICHT da ist oder nur
+    nicht ERKANNT wird. Rein lesend, wirft nie."""
+    page_map = getattr(inv, 'pages', {}) or {}
+    parts = []
+    for page in pages:
+        slots = page_map.get(page) or ()
+        names = []
+        unknown = 0
+        for s in slots:
+            st = getattr(s, 'state', None)
+            if st == 'item':
+                names.append(str(getattr(s, 'name', '?')))
+            elif st == 'unknown':
+                unknown += 1
+        seg = '%s:[%s]' % (page, ','.join(names) if names else '-')
+        if unknown:
+            seg += '+?%d' % unknown
+        parts.append(seg)
+    return ' '.join(parts)
+
+
 def plan_refill(inv, names):
     """Decide the next refill action from a scan.
 
@@ -320,6 +347,16 @@ def refill_from_inventory(item_names, target_xy, *, inp, wincap, db,
             return 'stopped'
         loc = find_first(inv, item_names)
         if loc is None:
+            # DIAGNOSE: was hat der Scan ueberhaupt gefunden? Eine present-aber-
+            # 'unknown' klassifizierte Box (z.B. Stack-Zahl wirft das Template-
+            # Matching) erscheint hier als '?N' -> sofort erkennbar, ob die Box
+            # FEHLT oder nur nicht ERKANNT wird. Soft -- Logging darf nie kippen.
+            try:
+                from debuglog import log as _dbg
+                _dbg.event('refill', 'Inventar-Scan: gesucht={} | gefunden: {}'.format(
+                    list(item_names), summarize_inventory(inv)))
+            except Exception:
+                pass
             return 'empty'
         page, row, col = loc
         tab_click(inp, calib, ox, oy, page)
@@ -329,6 +366,179 @@ def refill_from_inventory(item_names, target_xy, *, inp, wincap, db,
         # Den Drag selbst mit der interruptiblen Sleep ausstatten: bricht ein Stop
         # mitten in den Zwischen-Moves, gibt der finally-Block in ``drag`` die
         # Maustaste trotzdem frei (kein haengender Mausknopf).
+        drag(inp, fx, fy, int(target_xy[0]), int(target_xy[1]), sleep=sleep)
+        _napped(0.15)
+        return 'dragged'
+    except Exception:
+        return 'error'
+
+
+# ---------------------------------------------------------------------------
+# DEDIZIERTER PUZZLE-BOX-FINDER (robust, client-kalibriert)
+#
+# Warum nicht der itemdb-Scan? Auf dem echten Client (Screenshot 2026-06-17)
+# erkannte ``scan_inventory`` GAR NICHTS (alle Slots 'unknown'): (1) der Grid-
+# Auto-Align lockt ~10px daneben (Default-Grid 633,244 ist korrekt -> Box-Zentrum
+# 713,388 ✓), und (2) die Box traegt eine GROSSE Stueckzahl (57/104/200) in der
+# UNTEREN Haelfte -> Voll-Icon-MAD 41 (> Schwelle). Loesung (Bild-validiert):
+# am FESTEN Kalibrier-Grid abtasten + nur die OBERE Icon-Haelfte matchen
+# (Stueckzahl ignoriert). Messwerte: Standard-Box topMAD~1.0, Deluxe-Box ~24.8,
+# JEDER Nicht-Box-Slot >=39 -> Schwelle 28 trennt sauber.
+# ---------------------------------------------------------------------------
+BOX_MATCH_TOP_ROWS = 16   # nur die oberen 16 Zeilen matchen (untere = Stueckzahl)
+BOX_MATCH_MAX_MAD = 28.0  # bild-validiert: Box <=24.8, alles andere >=39
+BOX_MATCH_SHIFT = 3       # +-px Suchfenster (wie itemdb-Shift, gegen Sub-Pixel-Drift)
+
+_BOX_TPL_CACHE = {}
+
+
+def _box_template(name):
+    """``(bgr_float32[32,32,3], top_mask_bool[32,32])`` fuer
+    ``inventory_icons/<name>.png`` -- nur die obere Haelfte der Alpha-Maske aktiv
+    (untere traegt die variable Stueckzahl). Gecacht; ``None`` bei Fehler/headless.
+    BGR (cv2), passend zum BGR-Screenshot der WindowCapture."""
+    if name in _BOX_TPL_CACHE:
+        return _BOX_TPL_CACHE[name]
+    result = None
+    try:
+        import os
+        import cv2
+        from respath import resource_path
+        path = resource_path(os.path.join('inventory_icons', name + '.png'))
+        bgra = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if bgra is not None and bgra.ndim == 3 and bgra.shape[2] >= 4 \
+                and bgra.shape[0] >= BOX_MATCH_TOP_ROWS and _np is not None:
+            bgr = bgra[:, :, :3].astype(_np.float32)
+            mask = bgra[:, :, 3] > 32
+            mask[BOX_MATCH_TOP_ROWS:, :] = False   # untere Haelfte (Zahl) ignorieren
+            if mask.any():
+                result = (bgr, mask)
+    except Exception:
+        result = None
+    _BOX_TPL_CACHE[name] = result
+    return result
+
+
+def _box_slot_mad(frame, cx, cy, tpl_bgr, tpl_mask, shift=BOX_MATCH_SHIFT):
+    """Kleinste maskierte MAD (obere Haelfte) eines ``tpl``-Icons um Slot-Zentrum
+    ``(cx, cy)`` mit ``+-shift`` px Suchfenster. ``1e9`` wenn nicht auswertbar."""
+    th, tw = tpl_bgr.shape[0], tpl_bgr.shape[1]
+    h, w = frame.shape[0], frame.shape[1]
+    best = 1e9
+    for dy in range(-shift, shift + 1):
+        for dx in range(-shift, shift + 1):
+            y0 = cy + dy - th // 2
+            x0 = cx + dx - tw // 2
+            if y0 < 0 or x0 < 0 or y0 + th > h or x0 + tw > w:
+                continue
+            patch = frame[y0:y0 + th, x0:x0 + tw, :3].astype(_np.float32)
+            d = _np.abs(patch - tpl_bgr)[tpl_mask]
+            if d.size:
+                m = float(d.mean())
+                if m < best:
+                    best = m
+    return best
+
+
+def find_box_slot(capture_fn, switch_page_fn, box_names, calib=DEFAULT_CALIBRATION,
+                  pages=PAGE_ORDER, should_stop=None):
+    """ERSTE Box (eines der ``box_names``) im Inventar -- Seite ``pages`` in
+    Reihenfolge, je Seite row-major -- per OBERE-HAELFTE-Template-Match am
+    KALIBRIER-Grid (kein Auto-Align). Rueckgabe ``(page, row, col, name)`` oder
+    ``None``. Streng defensiv: wirft nie."""
+    if _np is None:
+        return None
+    tpls = [(n, _box_template(n)) for n in box_names]
+    tpls = [(n, t) for n, t in tpls if t is not None]
+    if not tpls:
+        return None
+    grid = (calib or {}).get('grid', {}) or {}
+    cols = int(grid.get('cols', 5))
+    rows = int(grid.get('rows', 9))
+    try:
+        lat = lattice_from_calibration(calib)
+        ox0, oy0 = lat.origin
+        px, py = lat.pitch
+    except Exception:
+        return None
+    stop = should_stop if callable(should_stop) else (lambda: False)
+    for page in pages:
+        try:
+            switch_page_fn(page)
+        except Exception:
+            pass
+        if stop():
+            return None
+        try:
+            frame = capture_fn()
+        except Exception:
+            frame = None
+        if frame is None or getattr(frame, 'ndim', 0) != 3:
+            continue
+        for row in range(rows):
+            for col in range(cols):
+                cx = int(ox0 + col * px + px // 2)
+                cy = int(oy0 + row * py + py // 2)
+                for name, (tb, tm) in tpls:
+                    if _box_slot_mad(frame, cx, cy, tb, tm) <= BOX_MATCH_MAX_MAD:
+                        return (page, row, col, name)
+    return None
+
+
+def box_refill_from_inventory(box_names, target_xy, *, inp, wincap,
+                              calib=DEFAULT_CALIBRATION, sleep=None,
+                              should_stop=None):
+    """Wie ``refill_from_inventory``, aber mit dem dedizierten, client-robusten
+    ``find_box_slot`` (fester Grid + obere-Haelfte-Match) statt dem itemdb-Scan,
+    der auf dem echten Client nichts erkennt. Findet die erste Box, wechselt auf
+    deren Seite, zieht sie an ``target_xy``. Rueckgabe
+    ``'dragged'|'empty'|'error'|'stopped'``. Wirft nie."""
+    if sleep is None:
+        import time
+        sleep = time.sleep
+    stop = should_stop if callable(should_stop) else (lambda: False)
+
+    def _napped(seconds):
+        result = sleep(seconds)
+        if result is False:
+            return False
+        return not stop()
+
+    try:
+        if stop():
+            return 'stopped'
+        ox = int(getattr(wincap, 'offset_x', 0) or 0)
+        oy = int(getattr(wincap, 'offset_y', 0) or 0)
+        aborted = {'stop': False}
+
+        def _switch_page(page):
+            tab_click(inp, calib, ox, oy, page)
+            if not _napped(0.2):
+                aborted['stop'] = True
+
+        loc = find_box_slot(wincap.get_screenshot, _switch_page, box_names,
+                            calib=calib, should_stop=lambda: aborted['stop'] or stop())
+        if aborted['stop'] or stop():
+            return 'stopped'
+        if loc is None:
+            try:
+                from debuglog import log as _dbg
+                _dbg.event('refill', 'Box-Scan (obere-Haelfte-Match): gesucht={} '
+                           '-> keine Box gefunden'.format(list(box_names)))
+            except Exception:
+                pass
+            return 'empty'
+        page, row, col, name = loc
+        try:
+            from debuglog import log as _dbg
+            _dbg.event('refill', 'Box gefunden: {} auf Seite {} Slot (r{},c{})'.format(
+                name, page, row, col))
+        except Exception:
+            pass
+        tab_click(inp, calib, ox, oy, page)
+        if not _napped(0.25):
+            return 'stopped'
+        fx, fy = inventory_slot_screen(row, col, ox, oy, calib)
         drag(inp, fx, fy, int(target_xy[0]), int(target_xy[1]), sleep=sleep)
         _napped(0.15)
         return 'dragged'

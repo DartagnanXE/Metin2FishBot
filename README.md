@@ -9,6 +9,18 @@ behaviour is fully preserved as the default.
 > violates the game's Terms of Service and may get your account banned. Use at
 > your own risk. See [`LICENSE.txt`](LICENSE.txt).
 
+## 🆕 What's new in 1.2.31
+
+- **Box refill: puzzle boxes are now reliably recognized in the inventory.** The
+  refill scanned all 4 pages but recognized no box and stopped with "out of boxes",
+  even though the boxes were on page IV. Two causes, both fixed: the auto grid
+  alignment was ~10 px off (now uses the fixed calibrated grid), and the box carries
+  a large stack count (57/104/200) on its lower half that broke full-icon matching
+  (now only the upper icon half is matched, ignoring the number). Proven on the real
+  screenshot: standard-box match distance ≈ 1.0, all non-box slots ≥ 39 — clean
+  separation. A dedicated, client-robust box finder replaces the general inventory
+  scan for refilling.
+
 ## 🆕 What's new in 1.2.30
 
 - **Puzzle solver: optimal all the way to the end (finish mode removed).** A real

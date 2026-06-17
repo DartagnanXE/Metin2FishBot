@@ -125,7 +125,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=True), \
-             mock.patch.object(refill, 'refill_from_inventory',
+             mock.patch.object(refill, 'box_refill_from_inventory',
                                return_value='dragged') as rfi:
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertTrue(ok)
@@ -141,7 +141,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=True), \
-             mock.patch.object(refill, 'refill_from_inventory',
+             mock.patch.object(refill, 'box_refill_from_inventory',
                                return_value='empty'):
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertFalse(ok)
@@ -155,7 +155,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=True), \
-             mock.patch.object(refill, 'refill_from_inventory',
+             mock.patch.object(refill, 'box_refill_from_inventory',
                                return_value='empty'):
             ok = b._refill_box(refill.BOX_DELUXE_NAMES, (503, 271), 'deluxe',
                                stop_on_empty=False)
@@ -167,7 +167,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=True), \
-             mock.patch.object(refill, 'refill_from_inventory',
+             mock.patch.object(refill, 'box_refill_from_inventory',
                                return_value='error'):
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertFalse(ok)
@@ -178,7 +178,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=False), \
-             mock.patch.object(refill, 'refill_from_inventory') as rfi:
+             mock.patch.object(refill, 'box_refill_from_inventory') as rfi:
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertFalse(ok)
         rfi.assert_not_called()      # kein Blind-Drag ohne offenes Inventar
@@ -188,7 +188,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
         with mock.patch.object(puzzle.PuzzleBot,
                                '_ensure_inventory_open_for_refill',
                                return_value=True) as ens, \
-             mock.patch.object(refill, 'refill_from_inventory') as rfi:
+             mock.patch.object(refill, 'box_refill_from_inventory') as rfi:
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertFalse(ok)
         ens.assert_not_called()
@@ -196,7 +196,7 @@ class RefillBoxOrchestrationTest(unittest.TestCase):
 
     def test_inactive_when_disabled(self):
         b = _bare(box_refill_enabled=False)
-        with mock.patch.object(refill, 'refill_from_inventory') as rfi:
+        with mock.patch.object(refill, 'box_refill_from_inventory') as rfi:
             ok = b._refill_box(refill.BOX_STD_NAMES, (503, 328), 'standard')
         self.assertFalse(ok)
         rfi.assert_not_called()

@@ -58,9 +58,14 @@ PUZZLE_STEP_DELAY = 0.1
 # ~0.1-0.3s nach dem Holen ist der Stein oft noch nicht gerendert -> der alte
 # EINMAL-Read las das Hintergrund-Grau (31,34,36) bzw. einen Uebergangsframe
 # und der Bot warf jeden Stein sofort weg. Jeder Frame liest ein FRISCHES
-# Capture; 2s decken Render-/Animations-Verzoegerung mit grossem Polster ab,
-# ohne den Treffer-Pfad zu verlangsamen (Erfolg beendet die Schleife sofort).
-PIECE_COLOR_RETRY_S = 2.0
+# Capture; der Wert deckt die Render-/Animations-Verzoegerung ab, ohne den
+# Treffer-Pfad zu verlangsamen (Erfolg beendet die Schleife sofort).
+# 1.0s (vorher 2.0): bei einem ECHTEN Stein endet die Schleife nach dem ersten
+# gerenderten Frame -> die 2s wurden NUR bei LEEREN Boxen voll ausgereizt und
+# verzoegerten die Leer-Erkennung. 1.0s ist ggue. ~0.3s Renderzeit noch >3x
+# Polster; der Streak=2-Debounce faengt einen einzelnen Aussetzer ohnehin ab
+# (User: Leer-Erkennung soll schnell weitergehen).
+PIECE_COLOR_RETRY_S = 1.0
 
 # -- Haertung (Sicherheits-Schicht, puzzle_safety) ------------------------
 # (FINISH_HARD_CAP / FINISH_AFTER_DISCARDS [oben]: der Finish-Modus wurde
@@ -93,10 +98,15 @@ BOARD_READ_RETRY_S = 0.6
 # aber schnell (~1 Zyklus Polster) reagieren statt sekundenlang ins Leere zu
 # klicken.
 BOX_EMPTY_STREAK = 2
-# So oft darf das Spiel wegen leerer Boxen NEU geoeffnet werden, bevor hart
-# gestoppt wird. 1 reicht: bleiben die Boxen NACH einem frischen Event-Oeffnen
-# erneut leer, sind sie wirklich aufgebraucht (kein Sinn im ESC<->Open-Loop).
-# Verhindert die Endlosschleife ESC -> oeffnen -> leer -> ESC -> oeffnen.
+# So oft darf das Spiel wegen leerer Boxen NEU geoeffnet werden, OHNE dass dazwischen
+# Fortschritt (ein erfolgreich gelesener Stein) passiert, bevor hart gestoppt wird.
+# WICHTIG: Der Zaehler wird bei JEDEM erfolgreichen Stein-Read auf 0 zurueckgesetzt
+# (s. Stein-Erfolgs-Pfad) -> er zaehlt nur AUFEINANDERFOLGENDE Neustarts OHNE
+# Fortschritt = das echte "Boxen aufgebraucht". PRODUKTIVE Neustarts (Nachlegen ->
+# weiterspielen) sind damit UNBEGRENZT (User-Vorgabe: unendliche Durchlaeufe bis
+# wirklich leer/verifiziert). 1 reicht: bleiben die Boxen NACH einem frischen
+# Event-Oeffnen SOFORT wieder leer (kein einziger Stein), sind sie wirklich
+# aufgebraucht. Verhindert weiter die Endlosschleife ESC -> oeffnen -> leer.
 BOX_REOPEN_MAX = 1
 
 # -- Magenta-Leer-Erkennung der Deluxe-Box (Deluxe-SPIELEN bleibt) ---------
@@ -1307,7 +1317,14 @@ class PuzzleBot(PuzzleDetectMixin):
                 # zurueck (nur AUFEINANDER folgende Leerschuesse gelten als "Box
                 # leer"). Deluxe-Versuche zaehlen hier NICHT mit (oben separat).
                 if piece is not None:
+                    # Erfolgreicher Stein = (evtl. nach Neustart) wieder spielbar
+                    # -> BEIDE Zaehler nullen. _box_reopen_tries zaehlt dadurch nur
+                    # AUFEINANDERFOLGENDE Neustarts OHNE Fortschritt (echtes "Boxen
+                    # leer"); produktive Neustarts sind UNBEGRENZT. Vorher
+                    # akkumulierte der Zaehler ueber die Session -> Stop schon nach
+                    # dem 1. Nachlegen (genau der gemeldete Bug 2026-06-20).
                     self._empty_getpiece_streak = 0
+                    self._box_reopen_tries = 0
                 elif deluxe_attempt:
                     pass  # Deluxe-Fehlversuch -> kein Standard-Box-Streak
                 else:

@@ -198,6 +198,18 @@ class DaggerFlowMixin:
     after = self._inventory_signature()
     land = self._diff_landing_slot(before, after)
     if land is None:
+      # Kein neues Item gelandet, obwohl der Tasche-voll-Schutz oben einen freien
+      # Slot bestaetigt + der Shop-Dolch lokalisiert wurde -> der Rechtsklick blieb
+      # WIRKUNGSLOS. Haeufigste Ursache auf langen Laeufen: KEIN Yang/Geld mehr
+      # (Kauf nicht moeglich). Ehrlicher Hinweis (User-Vorgabe "bis Geld weg");
+      # der Stop laeuft weiter ueber den OCR-unabhaengigen buy_unverified-Backstop
+      # -- eine sichere "kein Yang"-Erkennung braeuchte ein kalibriertes
+      # Fehlermeldungs-Template, das es (noch) nicht gibt.
+      try:
+        log.event(self.state, 'HINWEIS: Kauf ohne Wirkung trotz freiem Slot '
+                  '-> evtl. kein Yang/Geld mehr (sonst Render-Aussetzer)')
+      except Exception:  # pragma: no cover
+        pass
       # Lande-Slot des gekauften Dolchs unklar -> nicht verifiziert.
       self._buy_retries += 1
       if self._buy_retries > 2 or self._note_unverified():

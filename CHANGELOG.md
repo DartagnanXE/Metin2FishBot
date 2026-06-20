@@ -3,6 +3,41 @@
 Alle nennenswerten Aenderungen an diesem Projekt werden hier festgehalten.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 
+## [1.3.3] — 2026-06-20
+
+### Energiesplitter: unbegrenzter Lauf (`max_actions=0`) + „Geld leer"-Hinweis
+
+- **`max_actions=0` = UNBEGRENZT** (Default). Vorher wurde 0 auf `max(50, 3×stack_count)`
+  „auto-abgeleitet" → der Lauf stoppte nach ~50 Aktionen mitten in der 2. Runde
+  („kauft 20, verarbeitet, kauft 10, stoppt"). Der Dolch-Lauf ist bewusst
+  open-ended und läuft jetzt Runde für Runde, **bis die Hammer-Stacks im Beutel
+  aufgebraucht sind** (`_count_hammers()<=0 → done`) oder das **Geld/Yang ausgeht**
+  (wirkungsloser Kauf → `buy_unverified`-Stop). Ein positiver Wert bleibt als
+  harter Opt-in-Cap. Backstops (Hammer-Erschöpfung, `consecutive_unverified_stop`)
+  bleiben aktiv.
+- **Slot-Wechsel beim Stack-Verbrauch** wird weiterhin korrekt gehandhabt: der Bot
+  liest Hammer-/Dolch-Slots **jede Aktion live** (`find_inventory_item`,
+  `count_item`, Inventar-Diff) — wird ein Hammer-Stack leer, nutzt der nächste Scan
+  automatisch den nächsten Stack, und ein frei gewordener Slot wird beim Kauf
+  korrekt als neuer Dolch-Slot erkannt (kein gecachtes Slot-Layout, das driften
+  könnte).
+- **„Kein Geld"-Hinweis:** Bleibt ein Kauf trotz freiem Slot wirkungslos, loggt der
+  Bot jetzt „evtl. kein Yang/Geld mehr" → der Stopgrund ist im Log lesbar.
+
+### Puzzle: unbegrenzte Neustarts + schnellere Leer-Erkennung
+
+- **Unbegrenzte produktive Neustarts:** Der Reopen-Zähler (`_box_reopen_tries`) wird
+  bei **jedem erfolgreich gelesenen Stein auf 0 zurückgesetzt** → er zählt nur noch
+  **aufeinanderfolgende** Neustarts OHNE Fortschritt (= echtes „Boxen aufgebraucht").
+  Vorher akkumulierte er über die ganze Session → der Bot stoppte schon **nach dem
+  1. Nachlegen**, obwohl er danach noch normal weiterspielte. Jetzt: unendliche
+  Durchläufe, bis wirklich alles leer ist (verifiziert) oder gestoppt wurde.
+- **Schnellere Leer-Erkennung:** `PIECE_COLOR_RETRY_S` 2.0 → 1.0 s. Das Retry-Fenster
+  wurde NUR bei leeren Boxen voll ausgereizt (bei einem echten Stein endet es nach
+  dem ersten gerenderten Frame) → die Leer-Erkennung war unnötig träge. 1.0 s ist
+  ggü. ~0.3 s Renderzeit noch >3× Polster; der Streak=2-Debounce fängt einen
+  einzelnen Aussetzer weiterhin ab.
+
 ## [1.3.2] — 2026-06-20
 
 ### Fix: Reopen klickte auf den Spaltenkopf „Name" statt auf den FISCHPUZZLESPIEL-Button

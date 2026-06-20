@@ -126,14 +126,26 @@ class TestSetToBeginFreeze(unittest.TestCase):
                  'actions_done', 'consecutive_unverified'):
       self.assertEqual(getattr(bot, attr), 0)
 
-  def test_max_actions_auto_derived(self):
+  def test_max_actions_zero_means_unlimited(self):
+    # 0 = UNBEGRENZT: KEINE Auto-Ableitung mehr (frueher max(50, 3*stack_count)
+    # -> schnitt den open-ended Dolch-Lauf nach ~50 Aktionen ab). Der Lauf endet
+    # natuerlich bei Hammer-Erschoepfung; max_actions bleibt 0.
     bot = _make_bot(values=_values(**{'-ES_STACK_COUNT-': 100,
                                       '-ES_MAX_ACTIONS-': 0}))
-    self.assertEqual(bot.max_actions, max(50, round(3 * 100)))
+    self.assertEqual(bot.max_actions, 0)
 
   def test_explicit_cap_kept(self):
     bot = _make_bot(values=_values(**{'-ES_MAX_ACTIONS-': 7}))
     self.assertEqual(bot.max_actions, 7)
+
+  def test_zero_cap_never_hits(self):
+    # Backstop darf bei 0 (unbegrenzt) NIE feuern -- auch bei vielen Aktionen.
+    bot = _make_bot(values=_values(**{'-ES_MAX_ACTIONS-': 0}))
+    _arm(bot)
+    bot.actions_done = 100000
+    bot.botting = True
+    self.assertFalse(bot._action_cap_hit())
+    self.assertTrue(bot.botting)
 
   def test_freezes_new_keys(self):
     bot = _make_bot(values=_values(**{'-ES_STACK_COUNT-': 3,

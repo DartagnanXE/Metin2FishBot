@@ -289,6 +289,29 @@ class RestartRefillState4Test(unittest.TestCase):
             b.runHack()
         self.assertFalse(b.botting)
 
+    def test_successful_piece_resets_reopen_tries(self):
+        # REGRESSION (Bug 2026-06-20): nach 1 produktivem Neustart stoppte der Bot
+        # beim naechsten Leerlauf, weil _box_reopen_tries ueber die Session
+        # akkumulierte (1 >= BOX_REOPEN_MAX). Ein erfolgreicher Stein-Read MUSS den
+        # Zaehler nullen -> produktive Neustarts sind unbegrenzt.
+        b = self._bot_for_state4(_box_reopen_tries=1, _empty_getpiece_streak=1)
+        # State-4 laeuft (timer_action=0 -> Gate offen), aber der State-5-Body
+        # (Board-Read auf dem Dummy-Frame) wird im SELBEN Tick uebersprungen:
+        # State 4 setzt timer_action=jetzt -> State-5-Gate (dt > timep) ist mit
+        # timep=1.0 zu. Wir pruefen nur den Reset, der in State 4 passiert.
+        b.step_delay = 1.0
+        with mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
+                               return_value=_calib(True)), \
+             mock.patch.object(puzzle.PuzzleBot, 'get_new_piece_color',
+                               return_value=1), \
+             mock.patch.object(puzzle.PuzzleBot, '_register_deluxe_result',
+                               return_value=False), \
+             mock.patch.object(puzzle, 'sleep', lambda *_a: None):
+            b.runHack()
+        self.assertEqual(b._box_reopen_tries, 0)   # Reset -> naechster Neustart erlaubt
+        self.assertEqual(b._empty_getpiece_streak, 0)
+        self.assertEqual(b.state, 5)
+
 
 class SelbststartTest(unittest.TestCase):
     """runHack: Brett zu -> Spiel oeffnen (nicht hart stoppen)."""

@@ -277,12 +277,17 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
 
     self._freeze_config(values or {})
 
-    # max_actions ableiten (0 = auto): die Aktions-Obergrenze ist der einzige
-    # verbliebene Auto-Backstop. Aktion 1 braucht ~stack_count Kaeufe; Aktion 2
-    # haengt am Inventar-Bestand (open-ended) -> grosszuegiger Auto-Default.
-    soll = max(1, int(self.stack_count))
-    if int(self.max_actions) <= 0:
-      self.max_actions = max(50, round(3 * soll))
+    # max_actions: 0 = UNBEGRENZT (Default). Der Dolch-Lauf ist bewusst
+    # open-ended -- er laeuft Runde fuer Runde, bis die Hammer-Stacks im Beutel
+    # aufgebraucht sind (flow_dagger: _count_hammers() <= 0 -> _stop('done')).
+    # FRUEHER wurde 0 auf max(50, 3*stack_count) "auto-abgeleitet" -> das schnitt
+    # den Lauf nach ~50 Aktionen ab (Bug: stack_count ist NICHT der Workload, und
+    # bei daggers_per_round-Batches ist die Gesamtzahl ohnehin open-ended). Die
+    # echten Backstops bleiben aktiv: Hammer-Erschoepfung ('done') +
+    # consecutive_unverified_stop (Stuck-Schutz). Ein POSITIVER Wert bleibt als
+    # harter Opt-in-Cap erhalten; Negatives -> 0 (unbegrenzt).
+    if int(self.max_actions) < 0:
+      self.max_actions = 0
 
     # wincap erzeugen -- Fenster fehlt -> Stop-Grund merken (kein Raise nach
     # aussen; run_loop steuert botting). WindowCapture wirft bei fehlendem HWND.
@@ -552,7 +557,8 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
                 armed=self.armed,
                 stack_count=self.stack_count,
                 daggers_per_round=self.daggers_per_round,
-                max_actions=self.max_actions,
+                max_actions=(self.max_actions
+                             if int(self.max_actions) > 0 else 'unbegrenzt'),
                 unverif_stop=self.consecutive_unverified_stop,
                 freischalten=self.energie_freischalten)
     except Exception:  # pragma: no cover - Logging darf nie den Lauf kippen
@@ -568,8 +574,13 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
 
   # -- Backstops (OCR-unabhaengig, IMMER aktiv) ---------------------------
   def _action_cap_hit(self):
-    """``True`` + Stop, wenn die Aktions-Obergrenze erreicht ist."""
-    if self.actions_done >= int(self.max_actions):
+    """``True`` + Stop, wenn eine POSITIVE Aktions-Obergrenze erreicht ist.
+
+    ``max_actions <= 0`` = UNBEGRENZT -> dieser Backstop stoppt NIE (der Lauf
+    endet natuerlich bei Hammer-Erschoepfung; Stuck-Schutz via
+    ``consecutive_unverified_stop``). Nur ein vom Nutzer gesetzter positiver
+    Wert ist ein harter Cap."""
+    if int(self.max_actions) > 0 and self.actions_done >= int(self.max_actions):
       log.event(self.state, t('energiesplitter.max_actions', n=self.max_actions))
       self._stop('max_actions')
       return True

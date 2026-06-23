@@ -125,6 +125,38 @@ def slots_from_config(cfg):
     return out
 
 
+def _norm_hwnd(hwnd):
+    try:
+        return int(hwnd) if hwnd is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_config(raw):
+    """Roh-``multiclient``-Dict saeubern, OHNE die Client-Liste aufzufuellen.
+
+    Fuer die Config-Validierung (:mod:`interface.config.validate`): klemmt
+    ``count``, normalisiert vorhandene Eintraege (Modus + ``hwnd`` als int|None)
+    und laesst eine leere Liste leer (= Single-Client-Default, byte-identisch).
+    Muell-Eingaben -> sicheres Minimal-Dict."""
+    if not isinstance(raw, dict):
+        return {'count': MIN_CLIENTS, 'auto_restart': False, 'clients': []}
+    clients_raw = raw.get('clients')
+    clients = []
+    if isinstance(clients_raw, list):
+        for entry in clients_raw:
+            if isinstance(entry, dict):
+                clients.append({'mode': normalize_mode(entry.get('mode')),
+                                'hwnd': _norm_hwnd(entry.get('hwnd'))})
+            else:
+                clients.append({'mode': DEFAULT_MODE, 'hwnd': None})
+    return {
+        'count': clamp_count(raw.get('count', MIN_CLIENTS)),
+        'auto_restart': bool(raw.get('auto_restart', False)),
+        'clients': clients,
+    }
+
+
 def count_from_config(cfg):
     """Geklemmte Client-Anzahl aus der Config (fehlt -> ``MIN_CLIENTS``)."""
     return clamp_count(_raw(cfg).get('count', MIN_CLIENTS))

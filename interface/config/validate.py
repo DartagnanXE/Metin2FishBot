@@ -391,6 +391,15 @@ def validate(cfg):
         # Zeitzone bleibt fix auf Europe/Berlin (Spec) -- kein freies Feld.
         events['timezone'] = DEFAULTS['events']['timezone']
 
+        # Multiclient (1-4): count klemmen, Modi/HWNDs normalisieren. Die reine
+        # Logik lebt in multiclient_settings (eine Wahrheit, headless-testbar).
+        try:
+            import multiclient_settings
+            merged['multiclient'] = multiclient_settings.normalize_config(
+                merged.get('multiclient'))
+        except Exception:
+            merged['multiclient'] = copy.deepcopy(DEFAULTS['multiclient'])
+
         return merged
     except Exception:
         return copy.deepcopy(DEFAULTS)
@@ -429,6 +438,11 @@ def _validate_energiesplitter(value):
             src_d.get('buy_mode'), ('chat', 'click'), d_d['buy_mode']),
         'buy_delay_s': float(_clamp(
             src_d.get('buy_delay_s'), 0.0, 3.0, d_d['buy_delay_s'])),
+        'process_first': bool(src_d.get('process_first', d_d['process_first'])),
+        'process_pickup_s': float(_clamp(
+            src_d.get('process_pickup_s'), 0.0, 3.0, d_d['process_pickup_s'])),
+        'process_confirm_s': float(_clamp(
+            src_d.get('process_confirm_s'), 0.0, 3.0, d_d['process_confirm_s'])),
     }
     shared = {
         'speed_profile': _enum(

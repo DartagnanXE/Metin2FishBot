@@ -161,6 +161,52 @@ class TestValidation:
         assert mc.is_ready(slots, count=1) is True
 
 
+class TestNormalizeConfig:
+    def test_clamps_count_and_keeps_empty_clients(self):
+        out = mc.normalize_config({'count': 99, 'clients': []})
+        assert out == {'count': mc.MAX_CLIENTS, 'auto_restart': False, 'clients': []}
+
+    def test_normalizes_modes_and_hwnds_without_padding(self):
+        out = mc.normalize_config({'count': 2, 'auto_restart': True, 'clients': [
+            {'mode': 'bloed', 'hwnd': '7'},
+            {'mode': 'puzzle', 'hwnd': None}]})
+        assert out['count'] == 2
+        assert out['auto_restart'] is True
+        assert out['clients'] == [
+            {'mode': mc.DEFAULT_MODE, 'hwnd': 7},
+            {'mode': 'puzzle', 'hwnd': None}]
+
+    def test_garbage_input_is_safe(self):
+        out = mc.normalize_config('quatsch')
+        assert out == {'count': mc.MIN_CLIENTS, 'auto_restart': False, 'clients': []}
+
+    def test_non_dict_client_entries_dropped_to_default(self):
+        out = mc.normalize_config({'count': 1, 'clients': [None, 42]})
+        assert out['clients'] == [
+            {'mode': mc.DEFAULT_MODE, 'hwnd': None},
+            {'mode': mc.DEFAULT_MODE, 'hwnd': None}]
+
+
+class TestConfigValidateIntegration:
+    def test_validate_adds_normalized_multiclient_default(self):
+        from interface.config.validate import validate as _validate
+        out = _validate({})
+        assert out['multiclient'] == {'count': 1, 'auto_restart': False, 'clients': []}
+
+    def test_validate_clamps_and_normalizes(self):
+        from interface.config.validate import validate as _validate
+        out = _validate({'multiclient': {'count': 77, 'clients': [
+            {'mode': 'kaputt', 'hwnd': '8'}]}})
+        assert out['multiclient']['count'] == mc.MAX_CLIENTS
+        assert out['multiclient']['clients'] == [{'mode': mc.DEFAULT_MODE, 'hwnd': 8}]
+
+    def test_validate_single_client_byte_identical_shape(self):
+        from interface.config.validate import validate as _validate
+        out = _validate({'mode': 'fishing'})
+        # Default count=1 + leere clients => Single-Client, kein aufgeblaehtes Schema
+        assert out['multiclient']['clients'] == []
+
+
 class TestSpecs:
     def test_specs_only_active_marked(self):
         slots = [mc.ClientSlot(mode='fischen', hwnd=1),

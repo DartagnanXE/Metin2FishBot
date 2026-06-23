@@ -193,6 +193,14 @@ DEFAULTS = {
             # rein klickbasiert mit Delay (kein OCR; robust bei mehreren Seiten).
             'buy_mode': 'chat',
             'buy_delay_s': 0.35,          # Pause zw. Kaufklicks / Backoff bei Retry
+            # AN = vor dem Kauf zuerst die bereits auf Seite 1 liegenden Dolche
+            # einzeln verarbeiten (nur Dolche), dann normaler Kauf-Ablauf.
+            'process_first': False,
+            # Verarbeiten-Tempo (Sek.): Pause zwischen Aufnehmen & Setzen bzw.
+            # nach 'Ja' bis zur Re-Read-Pruefung. Das 'Ja'-Klicken selbst ist
+            # erkennungsgesteuert (kein fester Timer).
+            'process_pickup_s': 0.15,
+            'process_confirm_s': 0.4,
         },
         'shared': {
             'speed_profile': 'fast',
@@ -274,6 +282,11 @@ DEFAULTS = {
     # und im laufenden Stop-Button angezeigt.
     'controls': {
         'stop_hotkey': 'f6',
+    },
+    'multiclient': {              # Mehrere Spiel-Clients (1-4); Default = Single
+        'count': 1,               # leere 'clients' => Single-Client, byte-identisch
+        'auto_restart': False,
+        'clients': [],            # je Eintrag {'mode': <enum>, 'hwnd': int|None}
     },
 }
 

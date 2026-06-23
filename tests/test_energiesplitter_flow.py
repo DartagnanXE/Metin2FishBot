@@ -123,6 +123,42 @@ def _fake_modules(grid=True):
   return fake_detect, fake_geo
 
 
+class TestEnsureAllowedPage(unittest.TestCase):
+  """Item 3: der Bot fasst nur freigegebene Inventar-Seiten an. Guard liest die
+  aktive Seite und wechselt bei einer gesperrten auf die niedrigste erlaubte."""
+
+  def _cal(self):
+    return types.SimpleNamespace(INV_TAB_CENTERS={
+        'I': (654, 231), 'II': (693, 232),
+        'III': (732, 232), 'IV': (770, 232)})
+
+  def _guard(self, bot, active):
+    calls = []
+    bot._left_click = lambda x, y: (calls.append((x, y)) or True)
+    bot._settle = lambda *_a, **_k: None
+    det = types.SimpleNamespace(active_page=lambda _bgr: active)
+    with mock.patch.object(esbot_mod, '_detect', det), \
+         mock.patch.object(esbot_mod, '_cal', self._cal()):
+      bot._ensure_allowed_page()
+    return calls
+
+  def test_switches_to_lowest_enabled_when_blocked(self):
+    bot = _make_bot(values=_values(**{'-ES_INV_PAGES-': [2, 3]}))
+    self.assertEqual(self._guard(bot, 'I'), [(693, 232)])   # I gesperrt -> II
+
+  def test_noop_when_all_pages_enabled(self):
+    bot = _make_bot(values=_values(**{'-ES_INV_PAGES-': [1, 2, 3, 4]}))
+    self.assertEqual(self._guard(bot, 'I'), [])             # alle frei -> kein Klick
+
+  def test_noop_when_open_page_already_allowed(self):
+    bot = _make_bot(values=_values(**{'-ES_INV_PAGES-': [1, 3]}))
+    self.assertEqual(self._guard(bot, 'I'), [])             # I erlaubt -> kein Klick
+
+  def test_unknown_active_switches_to_working(self):
+    bot = _make_bot(values=_values(**{'-ES_INV_PAGES-': [3, 4]}))
+    self.assertEqual(self._guard(bot, None), [(732, 232)])  # unklar -> III
+
+
 class TestSetToBeginFreeze(unittest.TestCase):
   def test_resets_state_and_counters(self):
     bot = _make_bot()

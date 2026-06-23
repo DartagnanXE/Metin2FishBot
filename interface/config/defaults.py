@@ -209,6 +209,11 @@ DEFAULTS = {
             'max_actions': 0,             # 0 = auto
             'consecutive_unverified_stop': 3,
             'jitter_pct': 0.15,
+            # Freigegebene Inventar-Seiten (I-IV als 1-4): der Bot fasst NUR
+            # markierte Seiten an (Frei-Slot-Suche/Verarbeitung), unmarkierte
+            # bleiben unberuehrt. Default = alle 4 -> byte-identisch zu frueher
+            # (Bot nutzt die offene Seite, die immer in der Menge liegt).
+            'inventory_pages': [1, 2, 3, 4],
             # Default = SCHARF/Live (User-Entscheidung 2026-06-16: Tester sollen
             # direkt testen koennen). Der 'Scharf/Live'-Schalter bleibt; die
             # Erkennung-vor-Aktion + das Phase-0-GATE stoppen weiterhin sauber,

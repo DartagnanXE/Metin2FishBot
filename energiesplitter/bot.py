@@ -78,6 +78,14 @@ try:  # Geometrie/Kalibrierung (Agent A)
 except Exception:
     _geometry = None
 
+try:  # Reiter-Klick-Koordinaten (I-IV) fuer den Seiten-Guard
+    from energiesplitter import calibration as _cal
+except Exception:
+    _cal = None
+
+# Freigegebene Inventar-Seiten (Item 3) -- reine Logik, immer importierbar.
+from energiesplitter import inventory_pages as _inv_pages
+
 # Drag-Primitiv WIEDERVERWENDEN (A2) -- nie neu bauen. mouseUp im finally.
 try:
     from inventory_discard import drag as _discard_drag
@@ -384,6 +392,10 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
         _get('-ES_PROC_CONFIRM_S-', self.BUY_CONFIRM_SETTLE_S)))
     self.max_actions = int(_get('-ES_MAX_ACTIONS-', 0))
     self.consecutive_unverified_stop = int(_get('-ES_UNVERIF_STOP-', 3))
+    # Freigegebene Inventar-Seiten (Item 3): der Bot fasst NUR markierte Seiten
+    # an. Default = alle 4 -> Guard feuert nie -> byte-identisch zu frueher.
+    self._enabled_pages = _inv_pages.normalize_pages(
+        _get('-ES_INV_PAGES-', [1, 2, 3, 4]))
     self.dry_run = bool(_get('-ES_DRY_RUN-', True))
 
   # -- Phase-0-GATE (harter Blocker, CONTRACT §2) -------------------------
@@ -742,6 +754,7 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
       except Exception:  # pragma: no cover
         pass
       if is_open:
+        self._ensure_allowed_page()   # Item 3: nur freigegebene Seiten nutzen
         return True
       if attempt < tries - 1:
         self._press_key(self.inventory_hotkey)   # Toggle-Taste -> erneut pruefen
@@ -752,6 +765,40 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
       pass
     self._stop('inventory_not_open')
     return False
+
+  def _ensure_allowed_page(self):
+    """Stellt sicher, dass eine FREIGEGEBENE Inventar-Seite offen ist (Item 3).
+
+    Default = alle 4 Seiten frei -> No-op (Guard feuert nie, byte-identisch zu
+    frueher). Sonst: aktive Seite lesen (``detect.active_page``); ist sie
+    gesperrt oder unklar, den Reiter der Arbeits-Seite (niedrigste freigegebene)
+    anklicken -- reiner user32-Klick auf die kalibrierte Reiter-Mitte
+    (``calibration.INV_TAB_CENTERS``). So fasst der Bot nur markierte Seiten an
+    (``-ES_INV_PAGES-``). Strikt defensiv: wirft NIE, blockiert nie."""
+    try:
+      enabled = getattr(self, '_enabled_pages', _inv_pages.ALL_PAGES)
+      if tuple(enabled) == _inv_pages.ALL_PAGES:
+        return  # alle frei -> nie umschalten (byte-identisch)
+      if (_detect is None or not hasattr(_detect, 'active_page')
+              or _cal is None):
+        return  # headless/ohne Detektor: nicht blockieren (GATE deckt ab)
+      active = _detect.active_page(self._shot())
+      target = _inv_pages.target_tab(active, enabled)
+      if target is None:
+        return  # offene Seite bereits freigegeben
+      xy = getattr(_cal, 'INV_TAB_CENTERS', {}).get(target)
+      if not xy:
+        return
+      if self._left_click(xy[0], xy[1]):           # Reiter-Mitte klicken
+        self._settle(self.SHOP_OPEN_SETTLE_S)      # Seitenwechsel rendern lassen
+        try:
+          log.event(self.state,
+                    'AKTION: Inventar-Seite gewechselt (nur markierte nutzen)',
+                    aktiv=active, ziel=target, freigegeben=list(enabled))
+        except Exception:  # pragma: no cover
+          pass
+    except Exception:  # pragma: no cover - Guard darf nie eskalieren
+      pass
 
   def _dismiss_afk_if_present(self):
     """Erkennt den zentrierten 'Du bist im AFK-Modus'-Dialog und klickt OK weg.

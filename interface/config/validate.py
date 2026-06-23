@@ -466,9 +466,23 @@ def _validate_energiesplitter(value):
         'jitter_pct': float(_clamp(
             src_s.get('jitter_pct'), ES_JITTER_MIN, ES_JITTER_MAX,
             d_s['jitter_pct'])),
+        'inventory_pages': _validate_inventory_pages(
+            src_s.get('inventory_pages')),
         'dry_run': bool(src_s.get('dry_run', d_s['dry_run'])),
     }
     return {'hammer': hammer, 'dagger': dagger, 'shared': shared}
+
+
+def _validate_inventory_pages(value):
+    """Freigegebene Inventar-Seiten -> sortierte int-Liste aus 1..4 (nie leer).
+
+    Delegiert an die reine Logik (energiesplitter.inventory_pages); leeres/
+    ungueltiges Ergebnis faellt fail-safe auf ALLE Seiten zurueck."""
+    try:
+        from energiesplitter import inventory_pages as _ip
+        return list(_ip.normalize_pages(value))
+    except Exception:
+        return [1, 2, 3, 4]
 
 
 def _validate_offset(value):

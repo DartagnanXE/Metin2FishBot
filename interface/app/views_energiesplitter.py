@@ -159,6 +159,23 @@ class EnergiesplitterViewMixin:
                      self._es_entry('shared', 'consecutive_unverified_stop',
                                     self._es_unverif_var, bs))
 
+    # Freigegebene Inventar-Seiten (Item 3): der Bot fasst NUR markierte Seiten
+    # an (Reiter I-IV). Leere Auswahl ist unzulaessig -> faellt auf alle zurueck.
+    self._es_page_vars = {}
+    pagerow = ctk.CTkFrame(bs, fg_color='transparent')
+    pagerow.grid(row=r, column=0, columnspan=2, sticky='w', pady=(6, 0))
+    ctk.CTkLabel(pagerow, text=t('ui.es_pages_label'), text_color=TEXT_FAINT,
+                 font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=(0, 8))
+    for i, roman in enumerate(('I', 'II', 'III', 'IV')):
+      var = ctk.BooleanVar(value=True)
+      self._es_page_vars[i + 1] = var
+      ctk.CTkCheckBox(pagerow, text=roman, variable=var, width=46,
+                      command=self._es_commit_pages).grid(
+          row=0, column=i + 1, padx=(0, 6))
+    InfoBadge(pagerow, text=t('ui.es_pages_help')).grid(
+        row=0, column=5, padx=(6, 0))
+    r += 1
+
     # -- Section: Erweitert -- nur mit Vorsicht aendern ---------------------
     sec_a = Section(scroll, t('ui.es_group_advanced'))
     sec_a.grid(row=sec_row, column=0, sticky='ew', pady=(0, 8)); sec_row += 1
@@ -272,6 +289,18 @@ class EnergiesplitterViewMixin:
     except Exception:
       pass
 
+  def _es_commit_pages(self):
+    """Schreibt die markierten Inventar-Seiten als sortierte int-Liste (Item 3).
+
+    Leere Auswahl ist unzulaessig (der Bot braucht >=1 Seite) -> faellt auf alle
+    vier zurueck und setzt die Haken wieder."""
+    pages = [p for p, v in sorted(self._es_page_vars.items()) if bool(v.get())]
+    if not pages:
+      pages = [1, 2, 3, 4]
+      for v in self._es_page_vars.values():
+        v.set(True)
+    self._es_set('shared', 'inventory_pages', pages)
+
   def _es_commit_number(self, section, key, var, is_float):
     """Liest das Eingabefeld, wandelt in int/float, schreibt + spiegelt zurueck."""
     raw = (var.get() or '').strip()
@@ -308,6 +337,9 @@ class EnergiesplitterViewMixin:
       self._es_mouse_pause_var.set(str(s.get('mouse_pause', 0.05)))
       self._es_kb_pause_var.set(str(s.get('keyboard_pause', 0.10)))
       self._es_jitter_var.set(str(s.get('jitter_pct', 0.15)))
+      pages = set(s.get('inventory_pages', [1, 2, 3, 4]))
+      for _p, _v in getattr(self, '_es_page_vars', {}).items():
+        _v.set(_p in pages)
       # Tempo-Profil: value -> deutsches Label.
       v2l = self._es_widgets.get('_v2l', {}).get('speed_profile', {})
       self._es_speed_var.set(v2l.get(str(s.get('speed_profile', 'fast')),

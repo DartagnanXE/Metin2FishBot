@@ -54,6 +54,23 @@ class TestEnergiesplitterConfig(unittest.TestCase):
     # (User-Entscheidung 2026-06-16). Der 'Scharf/Live'-Schalter bleibt erhalten.
     self.assertEqual(es['shared']['dry_run'], False)
 
+  def test_inventory_pages_default_all_four(self):
+    # Item 3: Default = alle 4 Seiten freigegeben -> byte-identisch zu frueher.
+    cfg = config.validate(config.DEFAULTS)
+    self.assertEqual(cfg['energiesplitter']['shared']['inventory_pages'],
+                     [1, 2, 3, 4])
+
+  def test_inventory_pages_normalized_and_never_empty(self):
+    cfg = config.validate({'energiesplitter': {'shared': {
+        'inventory_pages': [3, 'I', 9, 1]}}})  # 9 raus, 'I'->1, dedup+sort
+    self.assertEqual(cfg['energiesplitter']['shared']['inventory_pages'],
+                     [1, 3])
+    # leere/ungueltige Auswahl faellt fail-safe auf ALLE Seiten zurueck
+    cfg2 = config.validate({'energiesplitter': {'shared': {
+        'inventory_pages': []}}})
+    self.assertEqual(cfg2['energiesplitter']['shared']['inventory_pages'],
+                     [1, 2, 3, 4])
+
   def test_no_yang_keys_remain(self):
     # Yang/gold/price/floor/spend/prefer_stack/process_mode/batch sind ENTFERNT.
     cfg = config.validate(config.DEFAULTS)

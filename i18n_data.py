@@ -666,6 +666,8 @@ TRANSLATIONS = {
     'ui.es_proc_confirm_label': {'en': "Verarbeiten: Pause nach 'Ja' (Sek.)", 'de': "Verarbeiten: Pause nach 'Ja' (Sek.)"},
     'ui.es_max_actions_label': {'en': 'Max. Aktionen (0 = unbegrenzt)', 'de': 'Max. Aktionen (0 = unbegrenzt)'},
     'ui.es_unverif_label': {'en': 'Stop nach unverifizierten Käufen', 'de': 'Stop nach unverifizierten Käufen'},
+    'ui.es_pages_label': {'en': 'Inventar-Seiten nutzen', 'de': 'Inventar-Seiten nutzen'},
+    'ui.es_pages_help': {'en': 'Mark which inventory pages (I-IV) the bot may use. It only touches marked pages and never switches to the others. Default: all four.', 'de': 'Markiere, welche Inventar-Seiten (I-IV) der Bot nutzen darf. Er fasst nur markierte Seiten an und wechselt nie auf die anderen. Standard: alle vier.'},
     'ui.es_speed_label': {'en': 'Tempo-Profil', 'de': 'Tempo-Profil'},
     'ui.es_mouse_pause_label': {'en': 'Maus-Pause (Sek.)', 'de': 'Maus-Pause (Sek.)'},
     'ui.es_kb_pause_label': {'en': 'Tastatur-Pause (Sek.)', 'de': 'Tastatur-Pause (Sek.)'},

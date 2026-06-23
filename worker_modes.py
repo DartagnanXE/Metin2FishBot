@@ -223,6 +223,8 @@ def _es_values(cfg, sub):
         values['-ES_UNVERIF_STOP-'] = int(
             shared.get('consecutive_unverified_stop', 5))
         values['-ES_JITTER-'] = float(shared.get('jitter_pct', 0.15))
+        values['-ES_INV_PAGES-'] = list(shared.get('inventory_pages',
+                                                   [1, 2, 3, 4]))
         values['-ES_DRY_RUN-'] = bool(shared.get('dry_run', True))
     except Exception:                # pragma: no cover - defensiv (Bot-Defaults)
         pass

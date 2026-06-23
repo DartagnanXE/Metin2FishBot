@@ -424,6 +424,8 @@ class RunLoop:
             values['-ES_UNVERIF_STOP-'] = int(
                 shared['consecutive_unverified_stop'])
             values['-ES_JITTER-'] = float(shared['jitter_pct'])
+            values['-ES_INV_PAGES-'] = list(shared.get('inventory_pages',
+                                                        [1, 2, 3, 4]))
             values['-ES_DRY_RUN-'] = bool(shared['dry_run'])
         except Exception as exc:
             log.error(t('run.crash_in_runhack'), exc=exc)

@@ -87,14 +87,21 @@ class TestDebugLogPath(unittest.TestCase):
 
 
 class TestLegacyConfigPaths(unittest.TestCase):
-    def test_returns_exe_dir_then_cwd(self):
-        # Erstes = config.json IM EXE-Ordner, letztes = CWD-Datei. Struktur statt
-        # exaktem String pruefen (os.path.abspath haengt auf Windows ein Laufwerk
-        # an -> der Code ist korrekt, ein harter String waere plattformabhaengig).
+    def test_returns_appdata_then_exe_dir_then_cwd(self):
+        # Reihenfolge nach der Umbenennung: (1) ALTER %APPDATA%/Metin2FishBot-
+        # Ordner (Rename-Migration, hoechste Praeferenz), (2) config.json IM
+        # EXE-Ordner, (3) CWD-Datei. Struktur statt exaktem String pruefen
+        # (os.path.abspath haengt auf Windows ein Laufwerk an).
         lst = paths.legacy_config_paths(
             executable=os.path.join('any', 'exe', 'dir', 'app.exe'))
+        # (1) Alt-Appdata zuerst: Elternordner == LEGACY_APP_DIR.
         self.assertEqual(os.path.basename(lst[0]), 'config.json')
-        self.assertEqual(os.path.basename(os.path.dirname(lst[0])), 'dir')
+        self.assertEqual(os.path.basename(os.path.dirname(lst[0])),
+                         paths.LEGACY_APP_DIR)
+        # (2) EXE-Ordner ist als Eintrag mit Elternordner 'dir' enthalten.
+        self.assertTrue(any(os.path.basename(os.path.dirname(p)) == 'dir'
+                            for p in lst))
+        # (3) CWD-Datei zuletzt.
         self.assertEqual(lst[-1], 'config.json')
 
     def test_never_raises(self):

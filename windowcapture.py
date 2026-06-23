@@ -267,6 +267,28 @@ class WindowCapture:
         self.offset_x = window_rect[0] + self.cropped_x
         self.offset_y = window_rect[1] + self.cropped_y
 
+    def resync_offsets(self):
+        """Liest ``GetWindowRect`` neu und setzt ``offset_x/offset_y`` neu.
+
+        NOETIG fuer Multiclient (G4): nach einem Tiling-``MoveWindow``/
+        ``SetWindowPos`` ist die im ``__init__`` EINMALIG eingefrorene
+        Bildschirm-Position veraltet -> ``get_screen_position`` liefert sonst
+        Koordinaten am alten Ort -> Klick daneben. Diese Methode gleicht die
+        Offsets an die aktuelle Fensterposition an (``cropped_x/cropped_y``
+        bleiben konstant). Streng defensiv: ``True`` bei Erfolg, ``False`` bei
+        Fehler/zerstoertem HWND -- wirft NIE.
+        """
+        if not self.hwnd:
+            return False
+        try:
+            window_rect = win32gui.GetWindowRect(self.hwnd)
+            self.offset_x = window_rect[0] + self.cropped_x
+            self.offset_y = window_rect[1] + self.cropped_y
+            return True
+        except Exception as exc:  # pragma: no cover - nur defensiver Fehlerpfad
+            _log_error('resync_offsets failed', exc=exc)
+            return False
+
     def get_screenshot(self):
 
         # get the window image data

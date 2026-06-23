@@ -108,6 +108,28 @@ class EnergiesplitterViewMixin:
     r = self._es_row(bd, r, t('ui.es_buy_delay_label'),
                      self._es_entry('dagger', 'buy_delay_s',
                                     self._es_buy_delay_var, bd, is_float=True))
+    # "Erst verarbeiten" -- vor dem Kauf zuerst die schon auf Seite 1 liegenden
+    # Dolche abarbeiten (nur Dolche). Switch + Infotext (InfoBadge).
+    self._es_process_first_var = ctk.BooleanVar(value=False)
+    pfw = ctk.CTkSwitch(
+        bd, text=t('ui.es_process_first_label'),
+        variable=self._es_process_first_var,
+        command=lambda: self._es_set('dagger', 'process_first',
+                                     bool(self._es_process_first_var.get())))
+    pfw.grid(row=r, column=0, sticky='w', pady=(6, 0))
+    InfoBadge(bd, text=t('ui.es_process_first_help')).grid(
+        row=r, column=1, sticky='w', padx=(6, 0), pady=(6, 0))
+    self._es_widgets['process_first'] = pfw
+    r += 1
+    # Verarbeiten-Tempo in Sekunden (Pause Aufnehmen<->Setzen / nach 'Ja').
+    self._es_proc_pickup_var = ctk.StringVar(value='0.15')
+    r = self._es_row(bd, r, t('ui.es_proc_pickup_label'),
+                     self._es_entry('dagger', 'process_pickup_s',
+                                    self._es_proc_pickup_var, bd, is_float=True))
+    self._es_proc_confirm_var = ctk.StringVar(value='0.4')
+    r = self._es_row(bd, r, t('ui.es_proc_confirm_label'),
+                     self._es_entry('dagger', 'process_confirm_s',
+                                    self._es_proc_confirm_var, bd, is_float=True))
 
     # -- Section: Sicherheit ------------------------------------------------
     sec_s = Section(scroll, t('ui.es_group_safety'))
@@ -274,6 +296,9 @@ class EnergiesplitterViewMixin:
       self._es_freischalten_var.set(bool(h.get('energie_freischalten', True)))
       self._es_daggers_var.set(str(d.get('daggers_per_round', 20)))
       self._es_buy_delay_var.set(str(d.get('buy_delay_s', 0.35)))
+      self._es_process_first_var.set(bool(d.get('process_first', False)))
+      self._es_proc_pickup_var.set(str(d.get('process_pickup_s', 0.15)))
+      self._es_proc_confirm_var.set(str(d.get('process_confirm_s', 0.4)))
       # Kauf-Modus: value -> Label.
       bm2l = self._es_widgets.get('_v2l', {}).get('buy_mode', {})
       self._es_buy_mode_var.set(bm2l.get(str(d.get('buy_mode', 'chat')),
@@ -337,6 +362,10 @@ class EnergiesplitterViewMixin:
                            False)
     self._es_commit_number('dagger', 'daggers_per_round', self._es_daggers_var,
                            False)
+    self._es_commit_number('dagger', 'process_pickup_s',
+                           self._es_proc_pickup_var, True)
+    self._es_commit_number('dagger', 'process_confirm_s',
+                           self._es_proc_confirm_var, True)
     self._es_commit_number('shared', 'max_actions', self._es_max_actions_var,
                            False)
     self._es_commit_number('shared', 'consecutive_unverified_stop',

@@ -234,7 +234,7 @@ def test_runner_full_game_headless(start_frame, monkeypatch):
     game = _FakeGame(start_frame, cross, results)
     pdi = _FakePDI(game)
 
-    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, '_input', pdi)
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: game)
     # Test-Timing: keine echten Wartezeiten
     monkeypatch.setattr(sr, 'POLL_S', 0.001)
@@ -273,7 +273,7 @@ def test_runner_full_game_headless(start_frame, monkeypatch):
 
 def test_runner_reports_missing_deps(monkeypatch):
     from interface import seher_runner as sr
-    monkeypatch.setattr(sr, 'pydirectinput', None)
+    monkeypatch.setattr(sr, '_input', None)
     res = sr.run_seher_game({})
     assert res.error == 'deps'
 
@@ -385,7 +385,7 @@ def test_quiescence_prevents_lost_clicks(start_frame, monkeypatch, tmp_path):
                'sieg', 'remis', 'niederlage', 'sieg']
     game = _AnimatingFakeGame(start_frame, cross, results)
     pdi = _AnimPDI(game)
-    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, '_input', pdi)
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: game)
     monkeypatch.setattr(sr, 'POLL_S', 0.001)
     monkeypatch.setattr(sr, 'STABLE_NEEDED', 2)

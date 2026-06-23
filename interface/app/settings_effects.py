@@ -291,7 +291,7 @@ class SettingsEffectsMixin:
         def _open():
             try:
                 import webbrowser
-                webbrowser.open('https://github.com/DartagnanXE/Metin2FishBot')
+                webbrowser.open('https://github.com/DartagnanXE/Metin2MultiTool')
             except Exception:
                 pass
         try:

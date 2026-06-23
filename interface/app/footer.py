@@ -25,7 +25,7 @@ class FooterMixin:
         except Exception:
             ver = '?'
         self._version_base = 'v' + ver
-        self._repo_url = 'https://github.com/DartagnanXE/Metin2FishBot'
+        self._repo_url = 'https://github.com/DartagnanXE/Metin2MultiTool'
 
         footer = ctk.CTkFrame(self, fg_color=PANEL_DARK, corner_radius=0)
         footer.grid(row=2, column=0, sticky='ew')
@@ -103,7 +103,7 @@ class FooterMixin:
         # Hover-Attribution. Bewusst sprachneutral (Eigennamen + URL).
         try:
             Tooltip(self._version_label,
-                    text=('Metin2 Fishing Bot · ' + self._version_base
+                    text=('Metin2 MultiTool · ' + self._version_base
                           + '\nMusketier Software - DartagnanXE'
                           + '\n' + self._repo_url))
         except Exception:
@@ -118,7 +118,7 @@ class FooterMixin:
         try:
             import webbrowser
             webbrowser.open(getattr(self, '_repo_url',
-                                    'https://github.com/DartagnanXE/Metin2FishBot'))
+                                    'https://github.com/DartagnanXE/Metin2MultiTool'))
         except Exception:
             pass
 

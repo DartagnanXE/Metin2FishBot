@@ -46,6 +46,18 @@ try:  # Eingabe-Treiber (Windows-only; in Tests gestubbt)
 except Exception:  # pragma: no cover - nur ohne Windows-Treiber
     _input = None
 
+
+def set_input_backend(backend):
+    """Tauscht den modulweiten Eingabe-Treiber ``_input`` (Multiclient).
+
+    Default = ``pydirectinput`` (Single-Client byte-identisch). Der Worker
+    injiziert hier ein ``cursor_client.LeasedPydirectinput`` -> jede Eingabe
+    laeuft als EIN Lease-Burst ueber die geteilte Maus. ``None`` -> der
+    Phase-0/_guarded-Gate blockt jede Aktion (``_input is None``). Wirkt auf alle
+    ``_input.*``-Aufrufe inkl. ``_discard_drag(_input, ...)``."""
+    global _input
+    _input = backend
+
 try:  # Fenster-Capture (Windows-only; in Tests gestubbt)
     from windowcapture import WindowCapture as _WindowCapture
 except Exception:  # pragma: no cover
@@ -114,6 +126,7 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
   ST_PROCESS_DRAG = 13
   ST_VERIFY_PROCESS = 14
   ST_RESCAN = 15
+  ST_PREPROCESS = 16
   ST_STOP = 99
 
   # -- Modus-Konstanten ---------------------------------------------------
@@ -220,6 +233,9 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
     # Wiederholung im Chat-Modus.
     self.buy_mode = 'chat'
     self.buy_delay_s = 0.35
+    # "Erst verarbeiten": vor dem Kauf erst die schon auf Seite 1 liegenden
+    # Dolche einzeln verarbeiten (nur Dolche). Einmal pro Lauf.
+    self.process_first = False
     self.inventory_hotkey = 'i'   # Toggle-Taste Tasche (run_loop injiziert Config)
     self.max_actions = 2
     self.consecutive_unverified_stop = 3
@@ -264,6 +280,9 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
     # jede Verarbeitung (-> evtl. kein Geld / leer) bis zum sauberen Stop.
     self._splitter_round_start = 0
     self._no_progress_rounds = 0
+    # "Erst verarbeiten" wurde fuer DIESEN Lauf bereits abgearbeitet (einmalig,
+    # bevor der Kauf-Ablauf startet).
+    self._preprocess_done = False
 
   # -- 'scharf'-Schalter (bewusste Tester-Aktion, CONTRACT §2/§7) ----------
   # KANONISCHER Name fuer den bewussten Live-/scharf-Schalter. Default NICHT
@@ -354,6 +373,15 @@ class EnergiesplitterBot(HammerFlowMixin, DaggerFlowMixin, BridgesMixin):
     mode = str(_get('-ES_BUY_MODE-', 'chat')).lower()
     self.buy_mode = mode if mode in ('chat', 'click') else 'chat'
     self.buy_delay_s = max(0.0, float(_get('-ES_BUY_DELAY_S-', 0.35)))
+    self.process_first = bool(_get('-ES_PROCESS_FIRST-', False))
+    # Verarbeiten-Tempo (Sek.) als Instanz-Override der Klassen-Defaults: Pause
+    # zwischen Aufnehmen & Setzen (PICKUP_SETTLE_S) bzw. nach 'Ja' bis Re-Read
+    # (BUY_CONFIRM_SETTLE_S). Default = aktueller Klassenwert -> Verhalten
+    # unveraendert, wenn die Keys fehlen (Tests duerfen weiter direkt setzen).
+    self.PICKUP_SETTLE_S = max(0.0, float(
+        _get('-ES_PROC_PICKUP_S-', self.PICKUP_SETTLE_S)))
+    self.BUY_CONFIRM_SETTLE_S = max(0.0, float(
+        _get('-ES_PROC_CONFIRM_S-', self.BUY_CONFIRM_SETTLE_S)))
     self.max_actions = int(_get('-ES_MAX_ACTIONS-', 0))
     self.consecutive_unverified_stop = int(_get('-ES_UNVERIF_STOP-', 3))
     self.dry_run = bool(_get('-ES_DRY_RUN-', True))

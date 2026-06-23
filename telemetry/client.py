@@ -31,7 +31,7 @@ DEFAULT_INTERVAL = 120          # seconds between submits (configurable)
 HTTP_TIMEOUT = 10               # per-request timeout (never hang the thread)
 BACKOFF_START = 5               # first retry delay after a failure (seconds)
 BACKOFF_MAX = 600               # cap the exponential backoff (10 min)
-_USER_AGENT = 'Metin2FishBot-Telemetry'
+_USER_AGENT = 'Metin2MultiTool-Telemetry'
 
 # Module-level handle to the single running sender thread + its stop flag. A new
 # start_sender replaces the previous one (stop the old, start the new).

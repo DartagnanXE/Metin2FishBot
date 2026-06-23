@@ -1,6 +1,58 @@
 import pydirectinput
 pydirectinput.PAUSE = 0.1  # KEYBOARD needs this hold to register in-game; 0.05 was too short for keys (fishing didn't cast). = pydirectinput default (what v1.1.0 used). Mouse-only flows (scan) lower it per-op to 0.05.
 import cv2 as cv
+
+
+# -- Input-Backend (Multiclient-Naht, Build-Schritt 6) ---------------------
+# Single-Client (Default): _DirectBackend ruft pydirectinput FORM-EXAKT wie
+# bisher -> byte- UND test-identisch (Tests patchen ``fishingbot.pydirectinput``;
+# die Methoden loesen den Namen zur Laufzeit auf, der Patch greift weiter).
+# Multiclient (eigener Worker-Prozess): set_input_backend() ersetzt _input durch
+# einen Lease-gebundenen Backend (CursorClient). WICHTIG: zusammengehoerige
+# Tastendruecke (keyDown+keyUp) laufen ueber EINE Methode (.key) -> EIN Lease,
+# damit kein anderer Client mitten in den Tastendruck graetscht (Atomizitaet).
+class _DirectBackend:
+    def set_pause(self, value):
+        pydirectinput.PAUSE = value
+
+    def click(self, x, y, button='left'):
+        # Form-exakt: ohne button (= Default 'left') KEIN button-kwarg senden,
+        # damit bestehende Test-Assertions auf die Aufrufform unveraendert gelten.
+        if button == 'left':
+            pydirectinput.click(x=x, y=y)
+        else:
+            pydirectinput.click(x=x, y=y, button=button)
+
+    def key(self, key):
+        pydirectinput.keyDown(key)
+        pydirectinput.keyUp(key)
+
+
+_input = _DirectBackend()
+
+
+def set_input_backend(backend):
+    """Ersetzt das Input-Backend (Multiclient-Worker). Default = _DirectBackend."""
+    global _input
+    _input = backend
+
+
+# Koeder-Nachlegen laeuft NICHT ueber _input (das kennt nur click/key), sondern
+# braucht moveTo/mouseDown/mouseUp (gehaltener Drag, refill.py). Single-Client =
+# None -> direkt das Modul ``pydirectinput`` (byte-identisch, weiter test-patchbar
+# ueber ``fishingbot.pydirectinput``). Multiclient-Worker setzt hier ein
+# lease-gebundenes Screen-Backend (cursor_client.LeasedScreenCursor) -> der Drag
+# laeuft als EIN Lease-Burst statt roh am falschen Fenster (Finding #1).
+_refill_backend = None
+
+
+def set_refill_backend(backend):
+    """Ersetzt das Refill-Input-Backend (Multiclient). Default None = pydirectinput."""
+    global _refill_backend
+    _refill_backend = backend
+
+
+import cv2 as cv  # noqa: E402  (nach dem Input-Backend-Block; bewusst)
 from time import time, sleep
 import random
 from windowcapture import WindowCapture
@@ -318,8 +370,7 @@ class FishingBot(FishingDetectMixin):
         neu auswirft. Gibt den genutzten Weg fuers Logging zurueck. Wirft nie."""
         how = 'esc'
         try:
-            pydirectinput.keyDown('esc')
-            pydirectinput.keyUp('esc')
+            _input.key('esc')                 # keyDown+keyUp atomar (ein Lease)
         except Exception:
             # Geht ESC nicht, reicht der State-Reset unten -> naechster Zyklus
             # wirft ohnehin neu aus.
@@ -490,7 +541,7 @@ class FishingBot(FishingDetectMixin):
             # Das Inventar ist beim Angeln IMMER offen -> KEIN I-Druck (kein
             # Oeffnen/Schliessen), direkt aus dem offenen Inventar nachlegen.
             result = _refill.refill_from_inventory(
-                _refill.BAIT_NAMES, target, inp=pydirectinput,
+                _refill.BAIT_NAMES, target, inp=(_refill_backend or pydirectinput),
                 wincap=self.wincap, db=self.bait_refill_db, calib=calib,
                 sleep=self._refill_sleep, should_stop=self._refill_should_stop)
 
@@ -536,8 +587,7 @@ class FishingBot(FishingDetectMixin):
         try:
             for action, value in steps:
                 if action == 'press':
-                    pydirectinput.keyDown(value)
-                    pydirectinput.keyUp(value)
+                    _input.key(value)         # keyDown+keyUp atomar (ein Lease)
                 elif action == 'sleep':
                     sleep(value)
         except Exception:
@@ -626,12 +676,12 @@ class FishingBot(FishingDetectMixin):
         # DirectInput sie nie. Ein vorheriger Inventar-Scan kann PAUSE auf 0,05
         # gesenkt haben (ok fuer Maus, zu kurz fuer die Tastatur) -> hier den
         # bewaehrten 0,1-Wert (= v1.1.0-Default) fuer den ganzen Angel-Lauf erzwingen.
-        pydirectinput.PAUSE = 0.1
+        _input.set_pause(0.1)
 
         mouse_x = int(self.FISH_WINDOW_POSITION[0] + self.wincap.offset_x + 200)
         mouse_y = int(self.FISH_WINDOW_POSITION[1] + self.wincap.offset_y + 200)
 
-        pydirectinput.click(x=mouse_x, y=mouse_y, button='right')
+        _input.click(mouse_x, mouse_y, button='right')
 
     def runHack(self):
         screenshot = self.wincap.get_screenshot()
@@ -668,7 +718,7 @@ class FishingBot(FishingDetectMixin):
             ox, oy = self.wincap.offset_x, self.wincap.offset_y
             mouse_x = int(ox + self.GOLDEN_TUNA_X)
             mouse_y = int(oy + self.GOLDEN_TUNA_Y[field])
-            pydirectinput.click(x=mouse_x, y=mouse_y)
+            _input.click(mouse_x, mouse_y)
             # Bestaetigungs-Fenster SCHARF schalten statt blind zu klicken: es
             # kommt erst mit der Server-Antwort (der alte Sofort-Klick feuerte
             # vorher ins Leere -> Dialog blieb offen). Solange das Options-
@@ -689,7 +739,7 @@ class FishingBot(FishingDetectMixin):
                 ox, oy = self.wincap.offset_x, self.wincap.offset_y
                 ok_x = int(ox + point[0])
                 ok_y = int(oy + point[1])
-                pydirectinput.click(x=ok_x, y=ok_y)
+                _input.click(ok_x, ok_y)
                 if time() - getattr(self, '_last_confirm_log', 0) > 3:
                     self._last_confirm_log = time()
                     _flog(self.state, t('fishing.golden_tuna_confirmed',
@@ -713,8 +763,7 @@ class FishingBot(FishingDetectMixin):
             self._maybe_refill_bait(screenshot)
 
             if time() - self.timer_action > self._roll_deadline(self.bait_time):
-                pydirectinput.keyDown(self.bait_key)
-                pydirectinput.keyUp(self.bait_key)
+                _input.key(self.bait_key)     # keyDown+keyUp atomar (ein Lease)
                 self.state = 1
                 self.timer_action = time()
                 # Neuer Wurf -> Whitelist darf diesen Fang frisch bewerten.
@@ -726,8 +775,7 @@ class FishingBot(FishingDetectMixin):
 
         if self.state == 1:
             if time() - self.timer_action > self._roll_deadline(self.throw_time):
-                pydirectinput.keyDown(self.cast_key)
-                pydirectinput.keyUp(self.cast_key)
+                _input.key(self.cast_key)     # keyDown+keyUp atomar (ein Lease)
                 self.state = 2
                 self.timer_action = time()
                 _flog(2, t('fishing.cast_out'))
@@ -809,7 +857,7 @@ class FishingBot(FishingDetectMixin):
                     mouse_x = int(pos_x + self.FISH_WINDOW_POSITION[0] + self.wincap.offset_x)
                     mouse_y = int(pos_y + self.FISH_WINDOW_POSITION[1] + self.wincap.offset_y)
 
-                    pydirectinput.click(x=mouse_x, y=mouse_y)
+                    _input.click(mouse_x, mouse_y)
                     _flog(3, t('fishing.fish_clicked'), x=mouse_x, y=mouse_y)
 
         return crop_img

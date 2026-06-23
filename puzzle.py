@@ -1,5 +1,20 @@
 import pydirectinput
 pydirectinput.PAUSE = 0.05  # fast, but down->up MUST stay held >~1 frame or the game IGNORES the key/click (PAUSE=0 = 0ms hold = not registered); 0.05 = ~3 frames
+
+# Eingabe-Treiber-Seam (Multiclient). Default = das echte pydirectinput
+# (Single-Client byte-identisch). Der Worker injiziert ein
+# ``cursor_client.LeasedPydirectinput`` -> jede Aktion laeuft als EIN Lease-Burst
+# ueber die geteilte Maus; ein Ctrl+E-Akkord/Drag wird zu EINEM Burst gebuendelt
+# (Halte-Dauer via PAUSE erhalten). ALLE Eingaben unten gehen ueber ``_input``.
+_input = pydirectinput
+
+
+def set_input_backend(backend):
+    """Tauscht den modulweiten Eingabe-Treiber ``_input`` (Multiclient)."""
+    global _input
+    _input = backend
+
+
 import cv2 as cv
 from time import time, sleep
 from windowcapture import WindowCapture
@@ -236,9 +251,13 @@ class PuzzleBot(PuzzleDetectMixin):
 
     wincap = None
 
-    tetris = Tetris()
+    # WICHTIG: tetris/timer_action sind INSTANZ-Zustand, kein Klassen-Default.
+    # Frueher ``tetris = Tetris()`` auf Klassenebene -> EINE Tetris-Instanz von
+    # ALLEN PuzzleBot-Instanzen geteilt (latente Falle, sobald zwei Instanzen
+    # existieren -- z.B. Tests). Echte Zuweisung erfolgt in ``set_to_begin``.
+    tetris = None
 
-    timer_action = time()
+    timer_action = 0.0
 
     get_piece_time = 2
 
@@ -280,6 +299,10 @@ class PuzzleBot(PuzzleDetectMixin):
                       path=debug_log_path(), level='DEBUG')
         log.section(t('puzzle.start_section'))
         self.wincap = WindowCapture(constants.GAME_NAME)
+        # tetris/timer_action pro Lauf frisch als INSTANZ-Zustand (siehe
+        # Klassen-Defaults oben): jede PuzzleBot-Instanz bekommt ihr eigenes Brett.
+        self.tetris = Tetris()
+        self.timer_action = time()
         self.state = 0
         self._discard_streak = 0      # Verwerfen-in-Folge (Finish-Modus-Trigger)
         self._fd_avail_cache = None   # Force-Deluxe: Box-Verfuegbarkeits-Cache
@@ -468,7 +491,7 @@ class PuzzleBot(PuzzleDetectMixin):
         cx, cy = accessor(self.board_size, self.key_points.get(keypoint_name))
         mouse_x = int(cx + self.puzzle_offset[0] + self.wincap.offset_x)
         mouse_y = int(cy + self.puzzle_offset[1] + self.wincap.offset_y)
-        pydirectinput.click(x=mouse_x, y=mouse_y, button=button)
+        _input.click(x=mouse_x, y=mouse_y, button=button)
 
     def _cell_screen_point(self, i, j):
         """Bildschirm-Klickpunkt der Brett-Zelle ``(i, j)`` als Int-Paar.
@@ -488,11 +511,11 @@ class PuzzleBot(PuzzleDetectMixin):
         """Klickt die Brett-Zelle ``(i, j)`` (Platzierungs-Klick).
 
         Wie die bisherigen Inline-Aufrufe ein POSITIONALER Links-Klick
-        ``pydirectinput.click(x, y)`` (ohne ``button``-Kwarg) auf den von
+        ``_input.click(x, y)`` (ohne ``button``-Kwarg) auf den von
         :meth:`_cell_screen_point` gelieferten Punkt -- byte-stabil.
         """
         mouse_x, mouse_y = self._cell_screen_point(i, j)
-        pydirectinput.click(mouse_x, mouse_y)
+        _input.click(mouse_x, mouse_y)
 
     def _box_screen_point(self, box_point):
         """Rechnet einen Box-Slot (Fenster-INHALT-Koordinate, z.B. PUZZLE_BOX /
@@ -714,7 +737,7 @@ class PuzzleBot(PuzzleDetectMixin):
             mx, my = self.deluxe_box_screen_point()
             log.event(self.state, t('puzzle.force_deluxe_open_box'),
                       pos=(mx, my))
-            pydirectinput.click(x=mx, y=my, button='left')
+            _input.click(x=mx, y=my, button='left')
             # Bestand hat sich geaendert -> Cache fuer den naechsten Zyklus frisch.
             self._reset_force_deluxe_cache()
             return True
@@ -753,33 +776,33 @@ class PuzzleBot(PuzzleDetectMixin):
         Modifier-Combos bei zu kurzem Druck). Fokus davor (Tasten brauchen ihn).
         Wirft nie."""
         self._focus_game()
-        old = getattr(pydirectinput, 'PAUSE', 0.05)
+        old = getattr(_input, 'PAUSE', 0.05)
         try:
-            pydirectinput.PAUSE = 0.1
-            pydirectinput.keyDown('ctrl')
+            _input.PAUSE = 0.1
+            _input.keyDown('ctrl')
             sleep(0.06)
-            pydirectinput.keyDown('e')
+            _input.keyDown('e')
             sleep(0.06)
-            pydirectinput.keyUp('e')
+            _input.keyUp('e')
             sleep(0.06)
-            pydirectinput.keyUp('ctrl')
+            _input.keyUp('ctrl')
         except Exception:
             pass
         finally:
-            pydirectinput.PAUSE = old
+            _input.PAUSE = old
         sleep(FLOW_PACE_S)
 
     def _press_esc(self):
         """ESC drueckt (schliesst das offene Fenster/Spiel). Fokus davor. Wirft nie."""
         self._focus_game()
-        old = getattr(pydirectinput, 'PAUSE', 0.05)
+        old = getattr(_input, 'PAUSE', 0.05)
         try:
-            pydirectinput.PAUSE = 0.1
-            pydirectinput.press('esc')
+            _input.PAUSE = 0.1
+            _input.press('esc')
         except Exception:
             pass
         finally:
-            pydirectinput.PAUSE = old
+            _input.PAUSE = old
         sleep(FLOW_PACE_S)
 
     def _overview_state(self, frame):
@@ -929,7 +952,7 @@ class PuzzleBot(PuzzleDetectMixin):
             my = int(pt[1] + getattr(self.wincap, 'offset_y', 0))
             log.event(self.state, t('puzzle.fisch_label_click',
                       pos=(mx, my), label_ncc=dbg.get('label_ncc')))
-            pydirectinput.click(x=mx, y=my, button='left')
+            _input.click(x=mx, y=my, button='left')
             sleep(FLOW_PACE_S)
             # (4) Erfolg = Brett offen UND Eventuebersicht wieder ZU. Das rein
             # strukturelle board_open meldet auch die noch offene Uebersicht als
@@ -1145,15 +1168,15 @@ class PuzzleBot(PuzzleDetectMixin):
             max_loc[1] + fish_jigsaw_chest.shape[0] / 2 + self.wincap.offset_y
         )
         # click the chest
-        pydirectinput.click(x=mouse_x, y=mouse_y, button="left")
+        _input.click(x=mouse_x, y=mouse_y, button="left")
 
         gx, gy = geometry.get_piece_point(self.board_size, self.key_points.get('getpiece'))
         mouse_x = int(gx + self.puzzle_offset[0] + self.wincap.offset_x)
         mouse_y = int(gy + self.puzzle_offset[1] + self.wincap.offset_y)
         # click the place where the piece will be
-        pydirectinput.click(x=mouse_x, y=mouse_y, button="left")
+        _input.click(x=mouse_x, y=mouse_y, button="left")
         # click the board
-        pydirectinput.click(
+        _input.click(
             self.wincap.offset_x + self.puzzle_offset[0],
             self.wincap.offset_y + self.puzzle_offset[1],
             button="left",
@@ -1261,7 +1284,7 @@ class PuzzleBot(PuzzleDetectMixin):
                         self.botting = False
                         return None
 
-                pydirectinput.click(x=mouse_x, y=mouse_y, button='left')
+                _input.click(x=mouse_x, y=mouse_y, button='left')
                 self.state = 1
                 self.timer_action = time()
 
@@ -1283,7 +1306,7 @@ class PuzzleBot(PuzzleDetectMixin):
                 log.event(self.state, t('puzzle.move_mouse_to_color_sample'))
                 self.state = 4
                 self.timer_action = time()
-                pydirectinput.moveTo(mouse_x, mouse_y)
+                _input.moveTo(mouse_x, mouse_y)
                 # Farb-Lese-Retry scharf schalten: bis zu dieser Deadline wird
                 # in State 4 pro Frame neu gelesen statt sofort zu verwerfen
                 # (der Stein ist nach dem Holen oft noch nicht gerendert).

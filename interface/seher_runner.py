@@ -43,6 +43,19 @@ try:  # pragma: no cover - nur auf dem Windows-Build vorhanden
 except Exception:  # pragma: no cover
     pydirectinput = None
 
+# Eingabe-Treiber-Seam (Multiclient). Default = das echte pydirectinput
+# (Single-Client byte-identisch). Der Worker injiziert ein
+# ``cursor_client.LeasedPydirectinput`` -> jede Aktion laeuft als EIN Lease-Burst
+# ueber die geteilte Maus (Ctrl+E-Akkord/Klicks gebuendelt). ALLE Eingaben unten
+# gehen ueber ``_input``; die ``_input is None``-Gates blocken ohne Treiber.
+_input = pydirectinput
+
+
+def set_input_backend(backend):
+    """Tauscht den modulweiten Eingabe-Treiber ``_input`` (Multiclient)."""
+    global _input
+    _input = backend
+
 try:  # pragma: no cover
     from windowcapture import WindowCapture
 except Exception:  # pragma: no cover
@@ -194,11 +207,11 @@ def run_seher_game(cfg, *, abort_fn=None, order='desc', debug=True,
     t0 = time.time()
     res = GameResult(order=order)
 
-    if pydirectinput is None or WindowCapture is None:
+    if _input is None or WindowCapture is None:
         res.error = 'deps'
         log.event('-', t('seher.deps_missing'))
         return res
-    pydirectinput.PAUSE = 0.05  # reiner Maus-Flow (Regel: Maus 0.05)
+    _input.PAUSE = 0.05  # reiner Maus-Flow (Regel: Maus 0.05)
 
     if wincap is None:
         try:
@@ -287,9 +300,9 @@ def run_seher_game(cfg, *, abort_fn=None, order='desc', debug=True,
             if debug:
                 log.event('0', t('seher.click', card=card, x=sx, y=sy,
                                  attempt=attempt))
-            pydirectinput.click(sx, sy)
+            _input.click(sx, sy)
             try:
-                pydirectinput.moveTo(wincap.offset_x + PARK_POINT[0],
+                _input.moveTo(wincap.offset_x + PARK_POINT[0],
                                      wincap.offset_y + PARK_POINT[1])
             except Exception:
                 pass
@@ -435,28 +448,28 @@ def _press_ctrl_e():
     """Strg+E mit expliziten Holds. DirectInput verschluckt Modifier-Combos
     bei zu kurzem Tastendruck (Lektion v1.1.1/.2 -- der erste Strg+E im
     Live-Log von 23:30 wurde gedroppt). Darum jede Phase mit eigenem Hold."""
-    old = pydirectinput.PAUSE
-    pydirectinput.PAUSE = 0.1
+    old = _input.PAUSE
+    _input.PAUSE = 0.1
     try:
-        pydirectinput.keyDown('ctrl')
+        _input.keyDown('ctrl')
         time.sleep(0.06)
-        pydirectinput.keyDown('e')
+        _input.keyDown('e')
         time.sleep(0.06)
-        pydirectinput.keyUp('e')
+        _input.keyUp('e')
         time.sleep(0.06)
-        pydirectinput.keyUp('ctrl')
+        _input.keyUp('ctrl')
     finally:
-        pydirectinput.PAUSE = old
+        _input.PAUSE = old
     time.sleep(FLOW_PACE_S)
 
 
 def _press_esc():
-    old = pydirectinput.PAUSE
-    pydirectinput.PAUSE = 0.1
+    old = _input.PAUSE
+    _input.PAUSE = 0.1
     try:
-        pydirectinput.press('esc')
+        _input.press('esc')
     finally:
-        pydirectinput.PAUSE = old
+        _input.PAUSE = old
     time.sleep(FLOW_PACE_S)
 
 
@@ -470,7 +483,7 @@ PARK_POINT = (15, 200)
 def _park_cursor(wincap):
     """Cursor von allen Buttons/Karten wegbewegen (reiner MOVE, nie Klick)."""
     try:
-        pydirectinput.moveTo(wincap.offset_x + PARK_POINT[0],
+        _input.moveTo(wincap.offset_x + PARK_POINT[0],
                              wincap.offset_y + PARK_POINT[1])
     except Exception:
         pass
@@ -577,7 +590,7 @@ def _wait_for(wincap, abort_fn, predicate, timeout):
 
 
 def _click_screen(wincap, point):
-    pydirectinput.click(wincap.offset_x + point[0],
+    _input.click(wincap.offset_x + point[0],
                         wincap.offset_y + point[1])
     _park_cursor(wincap)
     time.sleep(FLOW_PACE_S)  # Render-Floor; danach event-getriebenes Warten
@@ -724,7 +737,7 @@ def run_seher_session(cfg, *, abort_fn=None, order='desc', max_games=0,
     t0 = time.time()
     ses = SessionResult(after_action=after_action)
 
-    if pydirectinput is None or WindowCapture is None:
+    if _input is None or WindowCapture is None:
         ses.stopped_reason = 'deps'
         log.event('-', t('seher.deps_missing'))
         return ses

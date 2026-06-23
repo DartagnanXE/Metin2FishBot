@@ -36,7 +36,20 @@ import sys
 FILENAME = 'config.json'
 
 #: Unterordner im per-user App-Data fuer den read-only-EXE-Fallback.
-APP_DIR = 'Metin2FishBot'
+APP_DIR = 'Metin2MultiTool'
+
+#: FRUEHERER App-Data-Ordnername (vor der Umbenennung Metin2FishBot ->
+#: Metin2MultiTool). Wird als Legacy-Quelle gelesen, damit bestehende Nutzer
+#: ihre ``config.json``/``stats.json`` (Identitaet, Einstellungen, Zaehler)
+#: EINMALIG in den neuen Ordner migrieren (s. :func:`legacy_sibling_paths`).
+LEGACY_APP_DIR = 'Metin2FishBot'
+
+#: ENV-Variable, die ein Multiclient-Worker-Prozess bekommt: sein PRIVATER
+#: Datenordner (z.B. ``%APPDATA%/Metin2FishBot/client-0/``). Ist sie gesetzt,
+#: landen config/stats/debug-log dieses Prozesses dort -> 4 Worker kollidieren
+#: NICHT auf einer gemeinsamen Datei. Nicht gesetzt -> unveraendertes
+#: Single-Client-Verhalten (Modul-Docstring oben).
+ENV_DATA_DIR = 'M2FB_DATA_DIR'
 
 #: Name der Debug-Logdatei -- EINZIGE Quelle der Wahrheit (Writer in hack.py /
 #: puzzle.py und der "Open log file"-Knopf im Log-Panel teilen ihn).
@@ -76,9 +89,29 @@ def _appdata_path(appdata=None):
     return os.path.join(target, FILENAME)
 
 
+def client_data_dir():
+    """Privater Datenordner eines Multiclient-Workers aus ENV ``M2FB_DATA_DIR``.
+
+    Gesetzt -> Ordner wird (idempotent) angelegt und zurueckgegeben; alle
+    pfadbildenden Helfer (:func:`config_path`, :func:`sibling_path`,
+    :func:`debug_log_path`, ``stats.DEFAULT_STATS_PATH``) routen dann dorthin.
+    Nicht gesetzt -> ``None`` (Single-Client-Verhalten voellig unveraendert).
+    Wirft NIE -> jeder Fehler faellt auf ``None`` zurueck.
+    """
+    try:
+        directory = os.environ.get(ENV_DATA_DIR)
+        if not directory:
+            return None
+        os.makedirs(directory, exist_ok=True)
+        return directory
+    except Exception:
+        return None
+
+
 def config_path(frozen=None, executable=None, appdata=None):
     """Versions-/ordner-/rebuild-STABILER ``config.json``-Pfad (s. Modul-Docstring).
 
+    * Multiclient-Worker (``M2FB_DATA_DIR`` gesetzt) -> ``<datadir>/config.json``
     * nicht frozen (Dev/Test) -> ``'config.json'`` (CWD, unveraendert)
     * frozen (Portable-EXE)   -> ``%APPDATA%/Metin2FishBot/config.json``
 
@@ -87,6 +120,11 @@ def config_path(frozen=None, executable=None, appdata=None):
     Dateinamen (CWD) zurueck.
     """
     try:
+        # Multiclient hat Vorrang: ein Worker mit eigenem Datenordner ueberstimmt
+        # die frozen/CWD-Logik, damit seine Geschwisterdateien isoliert bleiben.
+        cdir = client_data_dir()
+        if cdir:
+            return os.path.join(cdir, FILENAME)
         if frozen is None:
             frozen = bool(getattr(sys, 'frozen', False))
         if not frozen:
@@ -117,12 +155,29 @@ def debug_log_path(appdata=None):
     return sibling_path(DEBUG_LOG_FILENAME, appdata=appdata)
 
 
+def _legacy_appdata_path(filename, appdata=None):
+    """``%APPDATA%/Metin2FishBot/<filename>`` -- der ALTE App-Data-Ordner vor der
+    Umbenennung. NUR Lese-Quelle fuer die Migration: legt nichts an, wirft nie.
+    Gibt ``None`` zurueck, wenn kein App-Data-Basispfad ermittelbar ist."""
+    try:
+        base = appdata if appdata is not None else os.environ.get('APPDATA')
+        if not base:
+            base = os.path.expanduser('~')
+        return os.path.join(base, LEGACY_APP_DIR, filename)
+    except Exception:
+        return None
+
+
 def legacy_sibling_paths(filename, executable=None):
     """Frueheres Speicherorte einer config-Geschwisterdatei (``config.json`` /
     ``stats.json``) fuer die EINMALIGE Migration nach ``%APPDATA%`` -- in
-    Praeferenz: (1) NEBEN der EXE (FIX v1) und (2) im CWD (vor-v1 / Dev). Wirft nie.
+    Praeferenz: (1) der ALTE %APPDATA%/Metin2FishBot-Ordner (Rename-Migration),
+    (2) NEBEN der EXE (FIX v1) und (3) im CWD (vor-v1 / Dev). Wirft nie.
     """
     out = []
+    legacy_appdata = _legacy_appdata_path(filename)
+    if legacy_appdata:
+        out.append(legacy_appdata)
     try:
         exe = executable if executable is not None else sys.executable
         exe_dir = os.path.dirname(os.path.abspath(exe or FILENAME))
@@ -141,5 +196,6 @@ def legacy_config_paths(executable=None):
 
 
 __all__ = ['config_path', 'legacy_config_paths', 'sibling_path',
-           'legacy_sibling_paths', 'debug_log_path', 'FILENAME', 'APP_DIR',
-           'DEBUG_LOG_FILENAME']
+           'legacy_sibling_paths', 'debug_log_path', 'client_data_dir',
+           'FILENAME', 'APP_DIR', 'LEGACY_APP_DIR', 'DEBUG_LOG_FILENAME',
+           'ENV_DATA_DIR']

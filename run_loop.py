@@ -410,6 +410,12 @@ class RunLoop:
             values['-ES_BUY_MODE-'] = str(es['dagger'].get('buy_mode', 'chat'))
             values['-ES_BUY_DELAY_S-'] = float(
                 es['dagger'].get('buy_delay_s', 0.35))
+            values['-ES_PROCESS_FIRST-'] = bool(
+                es['dagger'].get('process_first', False))
+            values['-ES_PROC_PICKUP_S-'] = float(
+                es['dagger'].get('process_pickup_s', 0.15))
+            values['-ES_PROC_CONFIRM_S-'] = float(
+                es['dagger'].get('process_confirm_s', 0.4))
             # shared.
             values['-ES_SPEED-'] = str(shared['speed_profile'])
             values['-ES_MOUSE_PAUSE-'] = float(shared['mouse_pause'])

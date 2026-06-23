@@ -1440,5 +1440,61 @@ class TestNoProgressGuard(unittest.TestCase):
     self.assertEqual(bot.state, EnergiesplitterBot.ST_APPROACH_NPC)
 
 
+class TestProcessFirst(unittest.TestCase):
+  """'Erst verarbeiten': vor dem Kauf erst die auf Seite 1 liegenden Dolche
+  abarbeiten (nur Dolche), dann normaler Kauf-Ablauf. Einmal pro Lauf."""
+
+  def _base_bot(self, process_first, hammers=5, slots=None):
+    bot = _make_bot(mode=MODE_DAGGER, values=_values(
+        **{'-ES_PROCESS_FIRST-': process_first}))
+    _arm(bot)
+    bot.state = EnergiesplitterBot.ST_INVENTORY_BASE
+    bot.botting = True
+    bot._ensure_inventory_open = lambda: True
+    bot._item_template_ready = lambda item: True
+    bot._count_hammers = lambda: hammers
+    bot._all_dolch_slots = lambda: (slots if slots is not None else [])
+    return bot
+
+  def test_freeze_reads_process_keys(self):
+    bot = _make_bot(values=_values(**{'-ES_PROCESS_FIRST-': True,
+                                      '-ES_PROC_PICKUP_S-': 0.0,
+                                      '-ES_PROC_CONFIRM_S-': 0.0}))
+    self.assertTrue(bot.process_first)
+    self.assertEqual(bot.PICKUP_SETTLE_S, 0.0)
+    self.assertEqual(bot.BUY_CONFIRM_SETTLE_S, 0.0)
+
+  def test_default_off_goes_straight_to_buy(self):
+    bot = self._base_bot(process_first=False, slots=[(7, 7)])
+    bot.runHack()  # ST_INVENTORY_BASE
+    self.assertEqual(bot.state, EnergiesplitterBot.ST_APPROACH_NPC)
+
+  def test_on_routes_to_preprocess_then_process_drag(self):
+    bot = self._base_bot(process_first=True, slots=[(7, 7), (8, 8)])
+    bot.runHack()  # ST_INVENTORY_BASE -> ST_PREPROCESS
+    self.assertEqual(bot.state, EnergiesplitterBot.ST_PREPROCESS)
+    bot.runHack()  # ST_PREPROCESS scannt Seite 1 -> ST_PROCESS_DRAG
+    self.assertEqual(bot.state, EnergiesplitterBot.ST_PROCESS_DRAG)
+    # Erster Dolch entnommen, zweiter wartet in der Queue.
+    self.assertEqual(bot._dolch_inv_slot, (7, 7))
+    self.assertEqual(bot._dagger_queue, [(8, 8)])
+    self.assertTrue(bot._preprocess_done)
+
+  def test_on_with_no_daggers_skips_to_buy(self):
+    bot = self._base_bot(process_first=True, slots=[])
+    bot.runHack()  # -> ST_PREPROCESS
+    bot.runHack()  # keine Dolche -> direkt zum Kauf
+    self.assertEqual(bot.state, EnergiesplitterBot.ST_APPROACH_NPC)
+    self.assertTrue(bot._preprocess_done)
+
+  def test_preprocess_runs_only_once(self):
+    # Nach dem Preprocess (RESCAN-Pfad) darf ST_INVENTORY_BASE nicht erneut
+    # vorkommen -- aber selbst wenn: _preprocess_done verhindert die Wiederholung.
+    bot = self._base_bot(process_first=True, slots=[(7, 7)])
+    bot._preprocess_done = True
+    bot.runHack()  # ST_INVENTORY_BASE -> direkt Kauf (schon verarbeitet)
+    self.assertEqual(bot.state, EnergiesplitterBot.ST_APPROACH_NPC)
+
+
 if __name__ == '__main__':
   unittest.main()

@@ -21,12 +21,12 @@ def _sample_release(tag='v1.0.4', with_asset=True):
              'browser_download_url': 'https://example/other.zip', 'size': 10},
             {'name': updater.PORTABLE_ASSET_NAME,
              'browser_download_url':
-                 'https://example/Metin2FishBot-Portable.exe',
+                 'https://example/Metin2MultiTool-Portable.exe',
              'size': 12_345_678},
         ]
     return {
         'tag_name': tag,
-        'html_url': 'https://github.com/DartagnanXE/Metin2FishBot/releases/'
+        'html_url': 'https://github.com/DartagnanXE/Metin2MultiTool/releases/'
                     'tag/' + tag,
         'assets': assets,
     }
@@ -39,7 +39,7 @@ class TestParseRelease(unittest.TestCase):
         self.assertEqual(info.tag, 'v1.0.4')
         self.assertEqual(info.version, '1.0.4')   # leading v stripped
         self.assertEqual(info.download_url,
-                         'https://example/Metin2FishBot-Portable.exe')
+                         'https://example/Metin2MultiTool-Portable.exe')
         self.assertEqual(info.size, 12_345_678)
         self.assertIn('releases', info.page_url)
 
@@ -137,11 +137,11 @@ class TestModeDetection(unittest.TestCase):
 class TestBatGeneration(unittest.TestCase):
     def test_contains_values_and_labels(self):
         bat = updater.build_update_bat(
-            pid=4321, target=r'C:\Apps\Metin2FishBot.exe',
-            new=r'C:\Temp\Metin2FishBot-Portable-1.0.4.exe')
+            pid=4321, target=r'C:\Apps\Metin2MultiTool.exe',
+            new=r'C:\Temp\Metin2MultiTool-Portable-1.0.4.exe')
         self.assertIn('4321', bat)
-        self.assertIn(r'C:\Apps\Metin2FishBot.exe', bat)
-        self.assertIn(r'C:\Temp\Metin2FishBot-Portable-1.0.4.exe', bat)
+        self.assertIn(r'C:\Apps\Metin2MultiTool.exe', bat)
+        self.assertIn(r'C:\Temp\Metin2MultiTool-Portable-1.0.4.exe', bat)
         # die drei Schleifen-/Sprungmarken muessen vorhanden sein
         self.assertIn(':waitloop', bat)
         self.assertIn(':copyloop', bat)
@@ -173,7 +173,7 @@ class TestDownloadUrlWhitelist(unittest.TestCase):
     def test_accepts_github_release_url(self):
         # github.com (browser_download_url) and the redirect targets are allowed.
         updater._validate_download_url(
-            'https://github.com/o/r/releases/download/v1/Metin2FishBot.exe')
+            'https://github.com/o/r/releases/download/v1/Metin2MultiTool.exe')
         updater._validate_download_url(
             'https://objects.githubusercontent.com/some/blob.exe')
         updater._validate_download_url(

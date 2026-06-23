@@ -51,7 +51,36 @@ class DaggerFlowMixin:
       if self.hammer_remaining <= 0:
         self._stop('done')
         return
-      self.state = self.ST_APPROACH_NPC
+      # "Erst verarbeiten": vor dem Kauf zuerst die bereits auf Seite 1
+      # liegenden Dolche abarbeiten (einmal pro Lauf). Sonst direkt zum Kauf.
+      if self.process_first and not self._preprocess_done:
+        self.state = self.ST_PREPROCESS
+      else:
+        self.state = self.ST_APPROACH_NPC
+      return
+
+    if st == self.ST_PREPROCESS:
+      # Scannt Seite 1 (die offene Tasche) und verarbeitet ALLE dort sicher als
+      # Dolch erkannten Slots EINZELN -- NUR Dolche (template-verifiziert), nie
+      # ein Fremd-Item -> BEVOR der Kauf-Mechanismus startet. Die eigentliche
+      # Verarbeitung laeuft ueber die bestehende ST_PROCESS_DRAG/ST_VERIFY_PROCESS-
+      # Maschinerie; ist die Queue leer, fuehrt ST_RESCAN automatisch zum Kauf
+      # (ST_APPROACH_NPC) bzw. zu 'done'. Einmal pro Lauf (_preprocess_done).
+      self._preprocess_done = True
+      if not self._ensure_inventory_open():
+        return  # hat sich selbst gestoppt
+      slots = self._all_dolch_slots()
+      if not slots:
+        log.event(st, 'ZUSTAND: keine vorhandenen Dolche auf Seite 1 '
+                  '-> direkt zum Kauf')
+        self.state = self.ST_APPROACH_NPC
+        return
+      self._dagger_queue = list(slots)
+      self._dolch_inv_slot = self._dagger_queue.pop(0)
+      self._splitter_round_start = self.splitter_summe
+      log.event(st, 'ZUSTAND: erst vorhandene Dolche verarbeiten '
+                '(Seite 1, KEIN Kauf)', anzahl=len(slots))
+      self.state = self.ST_PROCESS_DRAG
       return
 
     if st == self.ST_APPROACH_NPC:

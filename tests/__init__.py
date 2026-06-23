@@ -1,4 +1,4 @@
-# Test-Paket fuer die reine Solver-Logik des Metin2FishBot.
+# Test-Paket fuer die reine Solver-Logik des Metin2MultiTool.
 #
 # Enthaelt ausschliesslich stdlib-'unittest'-Tests, die NUR tetris.py und
 # piece.py importieren (keine Fremd-Dependencies wie numpy/cv2/win32/

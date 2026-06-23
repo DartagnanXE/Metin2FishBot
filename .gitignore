@@ -176,3 +176,6 @@ dist_v117/
 # Versionierte Build-Ausgaben generisch ignorieren (frischer distpath pro Build
 # gegen Datei-Lock der laufenden EXE) -> deckt dist_v130, dist_v131, ... ab.
 dist_v*/
+
+# Autopilot-Session-Scaffolding (nicht versionieren)
+.autopilot/

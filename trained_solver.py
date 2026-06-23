@@ -114,7 +114,18 @@ def load_V():
     global _V
     if _V is not None:
         return _V
-    path = _cache_path()
+    # G5 (Multiclient): der Supervisor baut/laedt trained_V GENAU EINMAL vor dem
+    # Spawn und setzt M2FB_TRAINED_V (Pfad) + M2FB_TRAINED_V_READY=1. Im READY-Fall
+    # laden die Worker AUSSCHLIESSLICH read-only -- NIE _compute_V, NIE np.save
+    # (auch nicht der Tier-2-.npy-Spiegel unten) -> kein 4x12s-Compute, kein
+    # np.save-Race auf eine geteilte Datei. Fehlt die vorgebaute Datei, ist das
+    # ein Supervisor-Bug -> bewusst HARTER Fail (G5-Assert), nicht stiller Fallback.
+    env_ready = os.environ.get('M2FB_TRAINED_V_READY')
+    env_path = os.environ.get('M2FB_TRAINED_V')
+    path = env_path or _cache_path()
+    if env_ready:
+        _V = np.load(path)
+        return _V
     # (1) schreibbarer .npy-Cache neben EXE/Modul (einmal berechnet/gespiegelt).
     try:
         if os.path.exists(path):

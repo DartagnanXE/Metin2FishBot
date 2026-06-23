@@ -38,12 +38,12 @@ from version import __version__, version_tuple
 # -- constants --------------------------------------------------------------
 
 GITHUB_API_LATEST = (
-    'https://api.github.com/repos/DartagnanXE/Metin2FishBot/releases/latest')
-RELEASES_PAGE = 'https://github.com/DartagnanXE/Metin2FishBot/releases/latest'
-PORTABLE_ASSET_NAME = 'Metin2FishBot-Portable.exe'
+    'https://api.github.com/repos/DartagnanXE/Metin2MultiTool/releases/latest')
+RELEASES_PAGE = 'https://github.com/DartagnanXE/Metin2MultiTool/releases/latest'
+PORTABLE_ASSET_NAME = 'Metin2MultiTool-Portable.exe'
 HTTP_TIMEOUT = 6              # seconds; short so a hang never stalls anything
 MIN_ASSET_BYTES = 2_000_000   # sanity floor (the real exe is tens of MB)
-_USER_AGENT = 'Metin2FishBot-Updater'
+_USER_AGENT = 'Metin2MultiTool-Updater'
 _CHUNK = 64 * 1024
 
 # Hosts the portable EXE may be downloaded from. A GitHub release asset's

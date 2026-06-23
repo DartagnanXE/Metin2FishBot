@@ -1,4 +1,4 @@
-"""UI-Paket des Metin2 Fishing Bot (CustomTkinter, Single-Window).
+"""UI-Paket des Metin2 MultiTool (CustomTkinter, Single-Window).
 
 Ersetzt das fruehere FreeSimpleGUI-Fenster. Oeffentliche Einstiegspunkte:
 

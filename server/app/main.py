@@ -39,7 +39,7 @@ async def _lifespan(app):
 def create_app():
     enable_docs = os.environ.get('ENABLE_DOCS', '0') == '1'
     app = FastAPI(
-        title='Metin2FishBot Ranking API',
+        title='Metin2MultiTool Ranking API',
         version='1',
         docs_url='/docs' if enable_docs else None,
         redoc_url=None,

@@ -40,7 +40,7 @@ block_cipher = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(SPEC)))
 from version import __version__, version_tuple
 
-APP_NAME = 'Metin2FishBot'
+APP_NAME = 'Metin2MultiTool'
 APP_VERSION = __version__                     # aus version.py (__version__)
 APP_PUBLISHER = 'Musketier Software'
 APP_COPYRIGHT = ''   # bewusst ohne Copyright-Vermerk

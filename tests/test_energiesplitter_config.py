@@ -89,6 +89,22 @@ class TestEnergiesplitterConfig(unittest.TestCase):
     self.assertEqual(high['energiesplitter']['dagger']['daggers_per_round'],
                      config.ES_DAGGERS_MAX)
 
+  def test_process_first_and_proc_delays(self):
+    # process_first ist bool; die Verarbeiten-Delays werden auf [0, 3] geklemmt.
+    cfg = config.validate({'energiesplitter': {'dagger': {
+        'process_first': True, 'process_pickup_s': 99,
+        'process_confirm_s': -5}}})
+    d = cfg['energiesplitter']['dagger']
+    self.assertIs(d['process_first'], True)
+    self.assertEqual(d['process_pickup_s'], 3.0)
+    self.assertEqual(d['process_confirm_s'], 0.0)
+
+  def test_process_defaults(self):
+    es = config.DEFAULTS['energiesplitter']['dagger']
+    self.assertIs(es['process_first'], False)
+    self.assertEqual(es['process_pickup_s'], 0.15)
+    self.assertEqual(es['process_confirm_s'], 0.4)
+
   def test_pause_clamped(self):
     cfg = config.validate(
         {'energiesplitter': {'shared': {'mouse_pause': 99,

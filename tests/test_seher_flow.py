@@ -240,7 +240,7 @@ def test_session_two_games_then_depleted_char_switch(fx, monkeypatch,
     sim = _SessionSim(fx, cross, games_allowed=2)
     pdi = _SessionPDI(sim)
 
-    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, '_input', pdi)
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: sim)
     _fast_timing(monkeypatch, sr)
     monkeypatch.setattr(sr, 'results_path',
@@ -266,7 +266,7 @@ def test_session_max_games_limit(fx, monkeypatch, tmp_path):
         'seher', 'templates', 'cross.png'), cv2.IMREAD_COLOR)
     sim = _SessionSim(fx, cross, games_allowed=99)
     pdi = _SessionPDI(sim)
-    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, '_input', pdi)
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: sim)
     _fast_timing(monkeypatch, sr)
     monkeypatch.setattr(sr, 'results_path',
@@ -313,7 +313,7 @@ def test_session_flow_error_stops_hard(fx, monkeypatch, tmp_path):
             pass
 
     sim = _DeadSim(np.zeros((600, 800, 3), dtype=np.uint8))
-    monkeypatch.setattr(sr, 'pydirectinput', _DeadPDI())
+    monkeypatch.setattr(sr, '_input', _DeadPDI())
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: sim)
     _fast_timing(monkeypatch, sr)
     monkeypatch.setattr(sr, '_save_debug_frame', lambda img, step: None)
@@ -365,7 +365,7 @@ def test_session_recovers_from_dropped_ansehen_click(fx, monkeypatch,
     sim.on_click = flaky_on_click
 
     pdi = _SessionPDI(sim)
-    monkeypatch.setattr(sr, 'pydirectinput', pdi)
+    monkeypatch.setattr(sr, '_input', pdi)
     monkeypatch.setattr(sr, 'WindowCapture', lambda name: sim)
     _fast_timing(monkeypatch, sr)
     monkeypatch.setattr(sr, 'results_path',

@@ -55,7 +55,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         b = _bare()
         with mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(True)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi:
+             mock.patch.object(puzzle, '_input') as pdi:
             self.assertTrue(b._open_puzzle_game())
             pdi.click.assert_not_called()   # schon offen -> kein Strg+E/Klick
 
@@ -83,7 +83,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         with mock.patch.object(puzzle, '_flow', flow), \
              mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(True)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi, \
+             mock.patch.object(puzzle, '_input') as pdi, \
              mock.patch.object(puzzle, 'sleep', lambda *_a: None):
             pdi.click.side_effect = lambda *a, **k: st.update(clicked=True)
             ok = b._open_puzzle_game(force=True)
@@ -95,7 +95,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         b = _bare()
         with mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(True)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi:
+             mock.patch.object(puzzle, '_input') as pdi:
             self.assertTrue(b._open_puzzle_game(force=False))
             pdi.click.assert_not_called()
 
@@ -123,7 +123,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         with mock.patch.object(puzzle, '_flow', flow), \
              mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                side_effect=calib_seq), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi, \
+             mock.patch.object(puzzle, '_input') as pdi, \
              mock.patch.object(puzzle, 'sleep', lambda *_a: None):
             pdi.click.side_effect = lambda *a, **k: st.update(clicked=True)
             ok = b._open_puzzle_game()
@@ -162,7 +162,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         with mock.patch.object(puzzle, '_flow', flow), \
              mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(True)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi, \
+             mock.patch.object(puzzle, '_input') as pdi, \
              mock.patch.object(puzzle, 'time', faketime), \
              mock.patch.object(puzzle, 'sleep', lambda *_a: None):
             ok = b._open_puzzle_game(force=True)
@@ -183,7 +183,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         with mock.patch.object(puzzle, '_flow', flow), \
              mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(False)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi, \
+             mock.patch.object(puzzle, '_input') as pdi, \
              mock.patch.object(puzzle, 'sleep', lambda *_a: None):
             ok = b._open_puzzle_game()
         self.assertFalse(ok)
@@ -198,7 +198,7 @@ class OpenPuzzleGameTest(unittest.TestCase):
         with mock.patch.object(puzzle, '_flow', flow), \
              mock.patch.object(puzzle.calibration, 'validate_puzzle_region',
                                return_value=_calib(False)), \
-             mock.patch.object(puzzle, 'pydirectinput') as pdi, \
+             mock.patch.object(puzzle, '_input') as pdi, \
              mock.patch.object(puzzle, 'sleep', lambda *_a: None):
             ok = b._open_puzzle_game()
         self.assertFalse(ok)
